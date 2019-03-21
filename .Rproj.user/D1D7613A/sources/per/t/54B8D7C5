@@ -5,15 +5,16 @@
     "dirty" : false,
     "encoding" : "UTF-8",
     "folds" : "",
-    "hash" : "0",
+    "hash" : "1634001538",
     "id" : "54B8D7C5",
-    "lastKnownWriteTime" : 1553190800,
-    "last_content_update" : 1553190800,
+    "lastKnownWriteTime" : 1553209582,
+    "last_content_update" : 1553209582578,
     "path" : "~/Desktop/h3n3_migration/fitness_analysis.R",
     "project_path" : "fitness_analysis.R",
     "properties" : {
-        "cursorPosition" : "6,0",
-        "scrollLine" : "0"
+        "cursorPosition" : "52,41",
+        "docOutlineVisible" : "0",
+        "scrollLine" : "22"
     },
     "relative_order" : 4,
     "source_on_save" : false,
