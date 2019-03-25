@@ -1,5 +1,6 @@
 ### Fitness analysis
 mismatches <- function(query, ref){
+  #find the mutations between a reference sequence and a query sequence
   query <- strsplit(as.character(query), split='')[[1]]
   ref <- strsplit(as.character(ref), split='')[[1]]
   Pos <- which(ref!=query)
@@ -46,25 +47,6 @@ FitnessNodes <- function(tree){
 }
 
 ### Analysis tools of the time aligned tree
-nameParent <- function(children){
-  parent <- getParent(tre.tt, nodelab.to.numb(children, tre.tt))
-  tre.tt$node.label[parent - length(tre.tt$tip.label)]
-}
-
-renameNodes <- function(tree){
-  lab <- c(tree$tip.label,'NODE_0000000', rep(NA, tree$Nnode-1))
-  while(anyNA(lab)){
-    for(r in (1:length(tree$edge[,1]))){
-      if(!is.na(lab[tree$edge[r,2]]) & is.na(lab[tree$edge[r,1]])) {
-        lab[tree$edge[r,1]] <- nameParent(lab[tree$edge[r,2]])
-      }
-    }
-  }
-  node.label <- sort(lab[-(1:length(tree$tip.label))])
-  tree$node.label <- node.label
-  tree
-}
-
 timeNodes <- function(tree){
   # List the infered time of each node and tips of a given tree
   tmrca <- max(sts[tree$tip.label])-max(nodeHeights(tree))
@@ -72,9 +54,8 @@ timeNodes <- function(tree){
   dates <- c(dates, tmrca) # add the age of the root node
   name.edge <- c(tree$tip.label, tree$node.label)[c(tree$edge[,2], length(tree$tip.label)+1)] #names in the order of tree$edge + the root node
   names(dates) <- name.edge
-  dates <- dates[ c(tree$tip.label, tree$node.label)]
   
-  dates
+  dates[ c(tree$tip.label, tree$node.label)]
 }
 
 extract.clade.simmap2 <- function(tree, node){
@@ -86,29 +67,11 @@ extract.clade.simmap2 <- function(tree, node){
   clade
 }
 
-date.edge.reg <- function(reg, tree){
-  #gives the dates of each edges of the tree spent within one region
-  dates.nodes <- timeNodes(tree)
-  edge.reg <- matrix(nrow=length(tree$maps), ncol=2)
-  
-  for (i in 1:length(tree$maps) ){
-    for (map in 1:length(tree$maps[[i]]) ){
-      
-      if (names(tree$maps[[i]][map]) == reg ){
-        if (map==1) {edge.reg[i,1] <- dates.nodes [ tree$edge[i,1] ]
-        } else edge.reg[i,1] <- dates.nodes [ tree$edge[i,1] ] + sum(sapply(1:(map-1), function(r) tree$maps[[i]][[r]]))
-        edge.reg[i,2] <- edge.reg[i,1] + tree$maps[[i]][[map]]
-      }
-    }
-  }
-  rownames(edge.reg) <- c(tree$tip.label, tree$node.label)[tree$edge[,2]]
-  edge.reg
-}
-
-dates.edges <- function(tree=tre.ms, meta=meta_tree){
+dates.edges <- function(tree=tre.sm, meta=meta_tree){
+  #creates a matrix giving for each edge the dates spent on each region
   DR <- array(dim = c(nrow(tree$edge),length(unique(region)),2))
   colnames(DR) <- levels(region)
-  rownames(DR) <- sapply(tree$edge[,2], function(e) nodenumb.to.lab(e))
+  rownames(DR) <- sapply(tree$edge[,2], function(e) nodenumb.to.lab(e)) #each row=one edge, named by the child node (unique)
   rw=0
   for(maps in tree$maps){
     rw=rw+1
@@ -120,16 +83,6 @@ dates.edges <- function(tree=tre.ms, meta=meta_tree){
     }
   }
   DR
-}
-
-edge.in.interval <- function(){
-  if (dates.reg[i,1]<start & dates.reg[i,2]>stop) {
-    select_reg <- c(select_reg, names(dates.reg[i,1]))
-  } else if (dates.reg[i,1]>start & dates.reg[i,1]<stop){
-    select_reg <- c(select_reg, names(dates.reg[i,1]))
-  } else if (dates.reg[i,2]>start & dates.reg[i,2]<stop){
-    select_reg <- c(select_reg, names(dates.reg[i,1]))
-  }
 }
 
 select.date <- function(start, stop, dates.reg){
@@ -149,13 +102,13 @@ select.date <- function(start, stop, dates.reg){
   select_reg
 }
 
-nodelab.to.numb <- function(nodelab, tree=tre.ms){
+nodelab.to.numb <- function(nodelab, tree=tre.tt){
   if(grepl('NODE',nodelab)) return(length(tree$tip.label) + which(tree$node.label==nodelab))
   if(grepl('ISL', nodelab)) return(which(tree$tip.label==nodelab))
   print(paste('error in nodelab.to.numb', nodelab, 'is not known', sep=' '))
 }
 
-nodenumb.to.lab <- function(nodenumb, tree=tre.ms){
+nodenumb.to.lab <- function(nodenumb, tree=tre.tt){
   if(grepl('NODE',nodenumb) | grepl('EPI',nodenumb)) return(nodenumb) #if it is already a nodelab
   if(strtoi(nodenumb)<=length(tree$tip.label)) return(tree$tip.label[nodenumb])
   tree$node.label[strtoi(nodenumb)-length(tree$tip.label)]
@@ -175,14 +128,16 @@ nodes.sameReg <- function(reg, node, GS, tree, elts=node){
   unique(elts)
 }
 
-getMembers <- function(listClades){
-  GS <-c(getStates(tre.ms, type='tips'), getStates(tre.ms, type='nodes')) #region of each tip/node in the order : tips and then nodes
-  M <- apply(listClades, 1, function(c) sapply(nodes.sameReg(reg=c[2], node=c[3], GS, tre.ms), function(n) {print(n);nodenumb.to.lab(n)}) )
+getMembers <- function(listClades, tree){
+  #lists all the nodes from each clade of interest continuously in the same region
+  GS <-c(getStates(tree, type='tips'), getStates(tree, type='nodes')) #region of each tip/node in the order : tips and then nodes
+  M <- apply(listClades, 1, function(c) sapply(nodes.sameReg(reg=c[2], node=c[3], GS, tree), function(n) {nodenumb.to.lab(n)}) )
   names(M) <- sapply(listClades$Node, function(n) nodenumb.to.lab(n))
   M
 }
 
 length.clades <- function(tree, GS){
+  #computes the number of nodes in the same region after an identified migration event
   edge.chg <- apply(tree$edge, 1, function(edge) {GS[edge[1]]!=GS[edge[2]] & edge[2]>tree$Nnode+1} ) #true/false in function of whether the edge changes of region, in the order of tree$edge
   node.chg <- tree$edge[,2][edge.chg] #root of each clade in the recipient region
   GSe <- GS[tree$edge[,2]] #reorder GS in function of the edge order
@@ -203,47 +158,6 @@ list.clades <- function(tree){
   
   result <- data.frame(Parent_Reg = listRegParents, Reciep_Reg = listRegReciep, Node = L, length = LC)
   result
-}
-
-test.Clade.Unique <- function(list.unique, i, j){
-  if (list.unique[i]==list.unique[j]) return(j)
-}
-
-inventory.clades <- function(listCladesTrees, listCladesUniques){
-  print('listing the presence/absence of the nodes of interest on each simulated tree ...')
-  presence.clade <- matrix(ncol=nsim, nrow=length(listCladesUniques))
-  regRec <- matrix(ncol=nsim, nrow=length(listCladesUniques))
-  regOri <- matrix(ncol=nsim, nrow=length(listCladesUniques))
-  rownames(presence.clade) <- listCladesUniques
-  
-  row = 0
-  for (clade.unique in listCladesUniques){
-    row <- row+1
-    col <- 0
-    for (listCladesSimtree in listCladesTrees){
-      col <- col+1
-      n <- 0
-      for (node in listCladesSimtree$Node){
-        n <- n+1
-        if (clade.unique == node){
-          presence.clade[row, col] <- n
-          regRec[row, col] <- listCladesSimtree$Reciep_Reg[n]
-          regOri[row, col] <- listCladesSimtree$Parent_Reg[n]
-          break()
-        }
-      }
-    }
-    countPerRegRec <- sapply(unique(region), function(reg) sum( regRec[row, ] == reg ) )
-    names(countPerRegRec) <- unique(region)
-    regRecMaj <- names(which(countPerRegRec == max(countPerRegRec)))[1]
-    presence.clade[row, ][!grepl(regRecMaj, regRec[row, ])] <- NA
-    
-    countPerRegOri <- sapply(unique(region), function(reg) sum( regOri[row, ] == reg ) )
-    names(countPerRegOri) <- unique(region)
-    regOriMaj <- names(which(countPerRegRec == max(countPerRegRec)))[1]
-    presence.clade[row, ][!grepl(regOriMaj, regOri[row, ])] <- NA
-  }
-  presence.clade
 }
 
 pairsMigr <- function(listClades){
@@ -284,7 +198,7 @@ plot.clades <- function(presence.clades, threshold=0.6, listCladesUniques, listC
     pdf(paste("clade ", listCladesUniques[cladenb], ".pdf", sep=''))
     simtree <- trees[[treenb]]
     listClades <- listCladesTrees[[treenb]]
-    clade <- extract.clade.simmap2(simtree, node = getParent(tre.ms, strtoi(listClades[[j,3]])) )
+    clade <- extract.clade.simmap2(simtree, node = getParent(tre.tt, strtoi(listClades[[j,3]])) )
     
     plotSimmap(clade,offset=0.5, fsize=min(0.4, 40/clade$Nnode), lwd=0.5, colors=cols)
     #nodelabels(text=extract.clade(tree, node = nodelab.to.numb(listClades[[i,3]], tree))$node.label, cex=min(0.5, 40/clade$Nnode), frame='none')
@@ -301,7 +215,7 @@ plot.clades <- function(presence.clades, threshold=0.6, listCladesUniques, listC
 tips.keep <- function(HACnb, mode=c('booth', 'tips', 'nodes')){
   nodes.keep = c()
   tips.keep=c()
-  nodes.rm <- which(nodes.chg%in% getDescendants(tre.ms, nodes.chg[HACnb]))
+  nodes.rm <- which(nodes.chg%in% getDescendants(tre.tt, nodes.chg[HACnb]))
   if(mode=='booth'|mode=='tips') tips.keep <- HACs[[HACnb]]$tip.label [!HACs[[HACnb]]$tip.label %in% unique(unlist(sapply(HACs[nodes.rm], function(c) c$tip.label)))]
   if(mode=='booth'|mode=='nodes') nodes.keep <- HACs[[HACnb]]$node.label [!HACs[[HACnb]]$node.label %in% unique(unlist(sapply(HACs[nodes.rm], function(c) c$node.label)))]
   if (length(tips.keep)>100 | length(nodes.keep)>100) return(c(tips.keep, nodes.keep))
@@ -316,7 +230,7 @@ test.date <- function(start, end, date, tol){
 
 fitness.distr <- function(VaxStrain, reg, ageRoot, tol=0.125){
   edges.in <- apply(dt.edges[,reg,], 1, function(e) {test.date(e[1],e[2],ageRoot, tol)})
-  nodes <- meta_tree$Isolate_Id[grepl(VaxStrain,meta_tree$VaxStrain[-(length(tre.ms$tip.label)+1)]) & edges.in]
+  nodes <- meta_tree$Isolate_Id[grepl(VaxStrain,meta_tree$VaxStrain[-(length(tre.tt$tip.label)+1)]) & edges.in]
   Fitness[nodes]
 }
 
@@ -368,8 +282,9 @@ likelihood.obs <- function(Donor, Rec, LPM, listClades){
   L = 1
   for (c in clades){
     fitnessRoot <- Fitness[c]
-    cladenb <- which(listClades$Node==nodelab.to.numb(c))
-    fitnessClade <- fitness.distr(listClades[cladenb,5], Donor, dates.nodes[c])
+    print(c('c',c))
+    print(meta_tree$VaxStrain[nodelab.to.numb(c)])
+    fitnessClade <- fitness.distr(meta_tree$VaxStrain[nodelab.to.numb(c)], Donor, meta_tree$Decimal_Date[nodelab.to.numb(c)])
     if(length(fitnessClade)<10) next()
     L = L * P(fitnessClade, fitnessRoot)
   }
@@ -381,8 +296,7 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim){
   Lmatrix = matrix(data=0, nrow=length(clades), ncol=nsim)
   rownames(Lmatrix)=clades
   for (c in clades){
-    cladenb <- which(listClades$Node==nodelab.to.numb(c))
-    fitnessClade <- fitness.distr(listClades[cladenb,5], Donor, dates.nodes[c])
+    fitnessClade <- fitness.distr(meta_tree$VaxStrain[nodelab.to.numb(c)], Donor, meta_tree$Decimal_Date[nodelab.to.numb(c)])
     if(length(fitnessClade)<10) next()
     R <- runif(nsim)
     e <- ecdf(fitnessClade)
@@ -398,14 +312,14 @@ proba.obs <- function(Donor, Rec, LPM){
   if(PM[Donor,Rec]>1){
     L <- likelihood.obs(Donor,Rec,LPM, listClades)
     sim <- likelihood.sim(Donor,Rec, LPM, 1000)
-    hist(sim, breaks=50, main=c(Donor, Rec))
+    #hist(sim, breaks=50, main=c(Donor, Rec))
     e <- ecdf(sim)
     return(e(L))
   }
   return(NA)
 }
 
-define_HAC <- function(){
+define_HAC <- function(meta_tree){
   meta_tree$VaxStrain <- rep(NA, length(Alignment_AA))
   
   for(i in 1:length(Alignment_AA)){
@@ -416,6 +330,6 @@ define_HAC <- function(){
     } else if(s[137]=='N' & s[147]=='K') {meta_tree$VaxStrain[i] <- 'SW17'
     } else if(s[175]=='Y')meta_tree$VaxStrain[i] <- 'HK14'
   }
-  
-  listClades$HACnb <- sapply(listClades$Node, function(n) meta_tree$VaxStrain[strtoi(n)])
+  meta_tree
+  #listClades$HACnb <- sapply(listClades$Node, function(n) meta_tree$VaxStrain[strtoi(n)])
 }  
