@@ -6,8 +6,9 @@ pattern='15-18'
 setwd('/Users/belie/Documents/Phylogeny/World_12-18/world_15-18')
 
 #Run treetime and load the tree
-system(paste('/anaconda3/bin/treetime ancestral --aln nt_world_', pattern, '_subsamp.fasta --tree ', "MCCtmp.nwk", ' --outdir treetime_ancestral', sep=''), wait=TRUE)
+system(paste('/anaconda3/bin/treetime ancestral --aln nt_world_', pattern, '_subsamp.fasta --tree ', "MCCtmp2.nwk", ' --outdir treetime_ancestral', sep=''), wait=TRUE)
 tre.tt <- ape::read.nexus("./treetime_ancestral/annotated_tree.nexus")
+tre.tt <- drop.tip(tre.tt, c('EPI_ISL_195549','EPI_ISL_197247'))
 
 #Load and process metadata
 meta = read.csv(paste('data_world_',pattern,'_subsamp.csv', sep=''))
@@ -25,6 +26,8 @@ names(tip.order) <- meta$Isolate_Id
 tip.order <- tip.order[tre.tt$tip.label]
 meta_tree <- bind_rows(meta[tip.order, ], meta_nodes) #build a new metadata folder with all computed informations from all nodes, in the order of the absolute node numbers
 meta_tree$Decimal_Date <- timeNodes(tre.tt)
+row.names(meta_tree) <- meta_tree$Isolate_Id
+meta_tree$Isolate_Id <- NULL
 
 #compute the fitness on each node
 Alignment <- readDNAStringSet (paste("./treetime_ancestral", "/ancestral_sequences.fasta", sep=""))
@@ -42,12 +45,14 @@ meta_tree <- define_HAC(meta_tree)
 #Run the MCMC stochastic mapping
 dst<- tre.tt
 dst$edge.length[dst$edge.length==0]<-max(nodeHeights(tre.tt))*1e-6 # set zero-length branches to be 1/1000000 total tree length
-nsim=10
+nsim=20
 trees.sm <- make.simmap(dst, region, model='ARD', nsim=nsim, Q='mcmc')
 
 #Analyze each stochastic mapping
 C <- rep(0,64)
+D <- rep(0,64)
 for (t in 1:nsim){
+  cnt <- rep(0,64)
   tre.sm <- trees.sm[[t]]
   #identify the migration events
   listClades <- list.clades(tre.sm)
@@ -59,10 +64,25 @@ for (t in 1:nsim){
   #analysis of the migrant fitness probability
   LPM <- listPairsMigr(listClades)
   x <- sapply(levels(region), function(d) sapply(levels(region), function(r) proba.obs(d,r,LPM)))
+  cnt[!is.na(x)] <- 1
+  x[is.na(x)] <- 0
   sup <- (x>0.1)*rep(1, length(x))
   C <- C+sup
-}
+  D <- D+cnt
+  
+  #plot the fitness evolution after migration
+  for(don in levels(region)) for(rec in levels(region)){
+    if(don==rec) next()
+    pdf(paste('fitness_evol_',don, rec,'.pdf'))
+    FE <- fitness_evol(don, rec, LPM)
+    print(FE)
+    if(!is.na(FE)) plot(FE$time, FE$fitness)
+    dev.off()
+    
+  }
 
+}
+C/D
 LM <- matrix(C, nrow=length(unique(region)), byrow=TRUE)
 rownames(LM) <- levels(region)
 colnames(LM) <- levels(region)

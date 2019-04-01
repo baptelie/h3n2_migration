@@ -47,7 +47,7 @@ FitnessNodes <- function(tree){
 }
 
 ### Analysis tools of the time aligned tree
-timeNodes <- function(tree){
+timeNodes <- function(tree, meta){
   # List the infered time of each node and tips of a given tree
   tmrca <- max(sts[tree$tip.label])-max(nodeHeights(tree))
   dates <- nodeHeights(tree)[,2] + tmrca
@@ -282,9 +282,7 @@ likelihood.obs <- function(Donor, Rec, LPM, listClades){
   L = 1
   for (c in clades){
     fitnessRoot <- Fitness[c]
-    print(c('c',c))
-    print(meta_tree$VaxStrain[nodelab.to.numb(c)])
-    fitnessClade <- fitness.distr(meta_tree$VaxStrain[nodelab.to.numb(c)], Donor, meta_tree$Decimal_Date[nodelab.to.numb(c)])
+    fitnessClade <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
     if(length(fitnessClade)<10) next()
     L = L * P(fitnessClade, fitnessRoot)
   }
@@ -296,7 +294,7 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim){
   Lmatrix = matrix(data=0, nrow=length(clades), ncol=nsim)
   rownames(Lmatrix)=clades
   for (c in clades){
-    fitnessClade <- fitness.distr(meta_tree$VaxStrain[nodelab.to.numb(c)], Donor, meta_tree$Decimal_Date[nodelab.to.numb(c)])
+    fitnessClade <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
     if(length(fitnessClade)<10) next()
     R <- runif(nsim)
     e <- ecdf(fitnessClade)
@@ -332,4 +330,17 @@ define_HAC <- function(meta_tree){
   }
   meta_tree
   #listClades$HACnb <- sapply(listClades$Node, function(n) meta_tree$VaxStrain[strtoi(n)])
-}  
+}
+
+fitness_evol <- function(Donor, Rec, LPM){
+  if(PM[Donor,Rec]<1) return(NA)
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
+  fit <- c()
+  t <- c()
+  for (c in clades){
+    tips <- grep('EPI',membersClades[[c]], value=TRUE)
+    fit <- Fitness[tips]-Fitness[c]
+    t <- meta_tree[tips,]$Decimal_Date - meta_tree[c,]$Decimal_Date
+  }
+  list(fitness=fit, time=t)
+}
