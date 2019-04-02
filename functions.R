@@ -118,14 +118,14 @@ nodenumb.to.lab <- function(nodenumb, tree=tre.tt){
 nodes.sameReg <- function(reg, node, GS, tree, elts=node){
   #count the number of nodes and tips continuously in the same region
   children <- tree$edge[which(tree$edge[,1]==node),2]
-  w <- names(which(GS[children]==reg))
+  w <- children[which(GS[children]==reg)]
   elts <- c(elts, w)
   if (length(w>0)){
     for (i in w) {
-      elts <- c(elts, nodes.sameReg(reg, i, GS, tree, elts))
+      elts <- nodes.sameReg(reg, i, GS, tree, elts)
     }
   }
-  unique(elts)
+  return(elts)
 }
 
 getMembers <- function(listClades, tree){
@@ -151,7 +151,7 @@ length.clades <- function(tree, GS){
 list.clades <- function(tree){
   GS <- c(getStates(tree, type='tips'), getStates(tree, type='nodes'))
   LC <- length.clades(tree, GS)
-  LC <- LC[LC>20] #keep clades with at least 20 continuous edges on the same region
+  LC <- LC[LC>14] #keep clades with at least 20 continuous edges on the same region
   L <- names(LC)
   listRegParents <- unlist(lapply(L, function(node) GS[getParent(tree, node)] ))
   listRegReciep <- unlist(lapply(L, function(node) GS[node] ))
@@ -332,15 +332,38 @@ define_HAC <- function(meta_tree){
   #listClades$HACnb <- sapply(listClades$Node, function(n) meta_tree$VaxStrain[strtoi(n)])
 }
 
-fitness_evol <- function(Donor, Rec, LPM){
+fitness_migr <- function(Donor, Rec, LPM){
   if(PM[Donor,Rec]<1) return(NA)
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
   fit <- c()
   t <- c()
   for (c in clades){
     tips <- grep('EPI',membersClades[[c]], value=TRUE)
-    fit <- Fitness[tips]-Fitness[c]
-    t <- meta_tree[tips,]$Decimal_Date - meta_tree[c,]$Decimal_Date
+    fit <- c(fit,Fitness[tips]-Fitness[c])
+    t <- c(t,meta_tree[tips,]$Decimal_Date - meta_tree[c,]$Decimal_Date)
   }
   list(fitness=fit, time=t)
+}
+
+fitness_random <- function(nsim=100){
+  #first, list the nodes with at least 15 children
+  size.nodes <- function(node, tree, size=node){
+    #like getDescendants, but stops at 15
+    children <- tree$edge[which(tree$edge[,1]==node),2]
+    w <- which(children>=length(tree$tip.label))
+    size <- c(size,children)
+    if (length(w>0) & length(size)<15) for (i in w) {
+      size <- size.nodes(children[i], tree, size)
+    }
+    return(size)
+  }
+  
+  nodesNb <- (length(tre.tt$tip.label)+1):(length(tre.tt$tip.label)+tre.tt$Nnode+1)
+  Lnodes <- sapply(nodesNb, function(n) length(size.nodes(n,tre.tt)) )
+  nodesOfI <- Lnodes[Lnodes>14]
+  
+  nodes <- runif(nsim)
+  chain_length <- rnorm(nsim,40,10)
+  
+  
 }

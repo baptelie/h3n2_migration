@@ -6,7 +6,7 @@ pattern='15-18'
 setwd('/Users/belie/Documents/Phylogeny/World_12-18/world_15-18')
 
 #Run treetime and load the tree
-system(paste('/anaconda3/bin/treetime ancestral --aln nt_world_', pattern, '_subsamp.fasta --tree ', "MCCtmp2.nwk", ' --outdir treetime_ancestral', sep=''), wait=TRUE)
+# system(paste('/anaconda3/bin/treetime ancestral --aln nt_world_', pattern, '_subsamp.fasta --tree ', "MCCtmp2.nwk", ' --outdir treetime_ancestral', sep=''), wait=TRUE)
 tre.tt <- ape::read.nexus("./treetime_ancestral/annotated_tree.nexus")
 tre.tt <- drop.tip(tre.tt, c('EPI_ISL_195549','EPI_ISL_197247'))
 
@@ -45,12 +45,13 @@ meta_tree <- define_HAC(meta_tree)
 #Run the MCMC stochastic mapping
 dst<- tre.tt
 dst$edge.length[dst$edge.length==0]<-max(nodeHeights(tre.tt))*1e-6 # set zero-length branches to be 1/1000000 total tree length
-nsim=20
+nsim=5
 trees.sm <- make.simmap(dst, region, model='ARD', nsim=nsim, Q='mcmc')
 
 #Analyze each stochastic mapping
 C <- rep(0,64)
 D <- rep(0,64)
+setwd("./fitness_evol")
 for (t in 1:nsim){
   cnt <- rep(0,64)
   tre.sm <- trees.sm[[t]]
@@ -73,17 +74,50 @@ for (t in 1:nsim){
   #plot the fitness evolution after migration
   for(don in levels(region)) for(rec in levels(region)){
     if(don==rec) next()
-    pdf(paste('fitness_evol_',don, rec,'.pdf'))
     FE <- fitness_evol(don, rec, LPM)
-    print(FE)
-    if(!is.na(FE)) plot(FE$time, FE$fitness)
-    dev.off()
-    
+    if(!is.na(FE[1])) {
+      pdf(paste('fitness_evol_',don,'-', rec,'.pdf', sep=''))
+      reg=lm(FE$fitness~FE$time)
+      plot(FE$time, FE$fitness, main=paste('Fitness evolution during the migration from',don,'to',rec), sub=summary(reg)$r.squared)
+      abline(reg)
+      dev.off()
+      }
   }
-
 }
 C/D
 LM <- matrix(C, nrow=length(unique(region)), byrow=TRUE)
 rownames(LM) <- levels(region)
 colnames(LM) <- levels(region)
 LM
+
+#compare fitness distri after migration vs stably within a same region
+fitness_migr <- c()
+fitness_within <- c()
+GS <-c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes')) #region of each tip/node in the order : tips and then nodes
+for (n in listClades$Node){
+  print(n)
+  FP <- Fitness[getParent(tre.tt,n)]
+  nodes_clade <- membersClades[[nodenumb.to.lab(n)]]
+  tree <- tre.sm
+  children <- tree$edge[which(tree$edge[,1]==n),2]
+  gd_children <- unlist(sapply(children, function(c) tree$edge[which(tree$edge[,1]==c),2]))
+  dates <- meta_tree[nodes_clade,]$Decimal_Date
+  fitness_migr <- c(fitness_migr, Fitness[gd_children]-FP)
+  
+  if(length(nodes_clade)>25 & max(dates)-min(dates)>0.5){
+
+    trees <- lapply(gd_children, function(gc) nodes.sameReg(GS[n], gc, GS, tre.sm))
+    Ltrees <- sapply(trees, function(t) length(t))
+    nodes_within <- trees[[which(Ltrees==max(Ltrees))]]
+    
+    fitness_within <- c(fitness_within, Fitness[nodes_within[-1]]-Fitness[nodes_within[1]])
+  }
+  
+}
+
+plot.ecdf(fitness_migr, xlim=c(-15,10), col='green')
+par(new=TRUE)
+plot.ecdf(fitness_within, xlim=c(-15,10), col='red')
+
+hist(fitness_migr, breaks=100, col='green')
+hist(fitness_within, breaks=100, col='red', add=TRUE)
