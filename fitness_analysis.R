@@ -90,30 +90,25 @@ rownames(LM) <- levels(region)
 colnames(LM) <- levels(region)
 LM
 
-#compare fitness distri after migration vs stably within a same region
+
+#compare fitness distri after migration vs sister within a same region
 fitness_migr <- c()
 fitness_within <- c()
 GS <-c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes')) #region of each tip/node in the order : tips and then nodes
-for (n in listClades$Node){
-  print(n)
-  FP <- Fitness[getParent(tre.tt,n)]
-  nodes_clade <- membersClades[[nodenumb.to.lab(n)]]
-  tree <- tre.sm
-  children <- tree$edge[which(tree$edge[,1]==n),2]
-  gd_children <- unlist(sapply(children, function(c) tree$edge[which(tree$edge[,1]==c),2]))
-  dates <- meta_tree[nodes_clade,]$Decimal_Date
-  fitness_migr <- c(fitness_migr, Fitness[gd_children]-FP)
-  
-  if(length(nodes_clade)>25 & max(dates)-min(dates)>0.5){
-
-    trees <- lapply(gd_children, function(gc) nodes.sameReg(GS[n], gc, GS, tre.sm))
-    Ltrees <- sapply(trees, function(t) length(t))
-    nodes_within <- trees[[which(Ltrees==max(Ltrees))]]
-    
-    fitness_within <- c(fitness_within, Fitness[nodes_within[-1]]-Fitness[nodes_within[1]])
-  }
-  
+pdf('fitness_migr_within.pdf')
+for (n in 1:nrow(listClades)){
+  me <- listClades[n,]
+  FP <- Fitness[getParent(tre.tt,me$Node)]
+  nodes_rec <- membersClades[[nodenumb.to.lab(me$Node)]]
+  nodes_don <- nodes.sameReg(me$Parent_Reg, getParent(tre.tt, me$Node), GS, tre.sm)
+  if(length(nodes_don)<5) next()
+  f_rec <- Fitness[nodes_rec]-FP
+  f_don <- Fitness[nodes_don]-FP
+  plot.ecdf(f_don, col='red', xlim=c(-15,10), main=paste(me$Node, me$Parent_Reg, me$Reciep_Reg), verticals=TRUE)
+  par(new=TRUE)
+  plot.ecdf(f_rec, col='green', xlim=c(-15,10), main='', verticals=TRUE)
 }
+dev.off()
 
 plot.ecdf(fitness_migr, xlim=c(-15,10), col='green')
 par(new=TRUE)
