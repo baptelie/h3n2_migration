@@ -110,7 +110,7 @@ nodelab.to.numb <- function(nodelab, tree=tre.tt){
 
 nodenumb.to.lab <- function(nodenumb, tree=tre.tt){
   if(grepl('NODE',nodenumb) | grepl('EPI',nodenumb)) return(nodenumb) #if it is already a nodelab
-  if(strtoi(nodenumb)<=length(tree$tip.label)) return(tree$tip.label[nodenumb])
+  if(strtoi(nodenumb)<=length(tree$tip.label)) return(tree$tip.label[strtoi(nodenumb)])
   tree$node.label[strtoi(nodenumb)-length(tree$tip.label)]
 }
 
@@ -131,7 +131,7 @@ nodes.sameReg <- function(reg, node, GS, tree, elts=node){
 getMembers <- function(listClades, tree){
   #lists all the nodes from each clade of interest continuously in the same region
   GS <-c(getStates(tree, type='tips'), getStates(tree, type='nodes')) #region of each tip/node in the order : tips and then nodes
-  M <- apply(listClades, 1, function(c) sapply(nodes.sameReg(reg=c[2], node=c[3], GS, tree), function(n) {nodenumb.to.lab(n)}) )
+  M <- apply(listClades, 1, function(c) sapply(nodes.sameReg(reg=c[2], node=c[3], GS, tree), function(n) nodenumb.to.lab(n) ) )
   names(M) <- sapply(listClades$Node, function(n) nodenumb.to.lab(n))
   M
 }
@@ -151,7 +151,7 @@ length.clades <- function(tree, GS){
 list.clades <- function(tree){
   GS <- c(getStates(tree, type='tips'), getStates(tree, type='nodes'))
   LC <- length.clades(tree, GS)
-  LC <- LC[LC>14] #keep clades with at least 20 continuous edges on the same region
+  LC <- LC[LC>19] #keep clades with at least 20 continuous edges on the same region
   L <- names(LC)
   listRegParents <- unlist(lapply(L, function(node) GS[getParent(tree, node)] ))
   listRegReciep <- unlist(lapply(L, function(node) GS[node] ))
@@ -366,4 +366,16 @@ fitness_random <- function(nsim=100){
   chain_length <- rnorm(nsim,40,10)
   
   
+}
+
+gd_children <- function(node,tree=tre.tt){
+  children <- tree$edge[which(tree$edge[,1]==node),2]
+  gd_children <- unlist(sapply(children, function(c) tree$edge[which(tree$edge[,1]==c),2]))
+  list(node=node, ch=children, gd_ch=gd_children)
+}
+
+check_within <- function(nodes, reg, GS){
+  w <- c()
+  for (n in nodes) if(GS[strtoi(n)]==reg) w<- c(w,n)
+  w
 }
