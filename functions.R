@@ -102,6 +102,13 @@ select.date <- function(start, stop, dates.reg){
   select_reg
 }
 
+DNAbin2Aln <- function(list_seq){
+  L= length(list_seq[[1]])
+  M = M=matrix(c(strsplit(as.character(list_seq[1]), split='')[[1]], strsplit(as.character(list_seq[2]), split='')[[1]] ), ncol=L, byrow=TRUE)
+  rownames(M)=names(list_seq)
+  ape::as.alignment(M)
+}
+
 nodelab.to.numb <- function(nodelab, tree=tre.tt){
   if(grepl('NODE',nodelab)) return(length(tree$tip.label) + which(tree$node.label==nodelab))
   if(grepl('ISL', nodelab)) return(which(tree$tip.label==nodelab))
