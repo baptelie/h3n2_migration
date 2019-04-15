@@ -237,7 +237,7 @@ test.date <- function(start, end, date, tol){
 
 fitness.distr <- function(VaxStrain, reg, ageRoot, tol=0.125){
   edges.in <- apply(dt.edges[,reg,], 1, function(e) {test.date(e[1],e[2],ageRoot, tol)})
-  nodes <- meta_tree$Isolate_Id[grepl(VaxStrain,meta_tree$VaxStrain[-(length(tre.tt$tip.label)+1)]) & edges.in]
+  nodes <- rownames(meta_tree)[grepl(VaxStrain,meta_tree$VaxStrain[-(length(tre.tt$tip.label)+1)]) & edges.in]
   Fitness[nodes]
 }
 
@@ -386,3 +386,29 @@ check_within <- function(nodes, reg, GS){
   for (n in nodes) if(GS[strtoi(n)]==reg) w<- c(w,n)
   w
 }
+
+fitness_evol <- function(Donor, Rec, LPM, plot=FALSE){
+  if(PM[Donor,Rec]<1) return(NA)
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
+  fit <- c()
+  t <- c()
+  slope <- c()
+  r2 <- c()
+  CI95 <- c()
+  for (c in clades){
+    tips <- grep('EPI',membersClades[[c]], value=TRUE)
+    fit <- Fitness[tips]-Fitness[c]
+    t <- meta_tree[tips,]$Decimal_Date - meta_tree[c,]$Decimal_Date
+    reg <- lm(fit~t+0)
+    if(plot){
+      plot(t,fit,main=paste('migration from',Donor,'to',Rec,c), sub=paste('r^2:',round(summary(reg)$r.squared, digits=2),'95%CI:', unlist(round(confint(reg), digits=2))) )
+      abline(reg)
+    }
+
+    
+    slope <- c(slope, reg$coefficients)
+    r2 <- c(r2, summary(reg)$r.squared)
+    CI95 <- c(CI95, confint(reg) )
+  }
+  list(slope=slope, r2=r2, CI95=CI95)
+} 
