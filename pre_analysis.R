@@ -1,7 +1,7 @@
 library(ape) ;  library(magrittr); library(lubridate); library(seqinr)
 library(Biostrings); library(dplyr); library(data.table)
 
-prefix = "world_12-18"
+prefix = "world_13-19"
 
 setwd(paste("~/Documents/Phylogeny/", prefix, sep=""))
 meta = read.csv(paste("data_",prefix,".csv", sep=""))
@@ -20,7 +20,7 @@ ambiguous <- names(full_aln[unambiguousl])
 sts <- decimal_date(ymd(meta$Collection_Date))
 names(sts) <- meta$Isolate_Id
 hist( sts , main = 'Time of sequence sampling', breaks=100) 
-incompl_date <- c( names(which(is.na(sts))), names(which(sts>2018.5)) )
+incompl_date <- c( names(which(is.na(sts))), names(which(sts>2019.5)) )
 meta$Decimal_Date <- sts
 
 ###Identify the incomplete locations (country)
@@ -57,7 +57,7 @@ clean_meta0 <- clean_meta0[(clean_meta0$Isolate_Id %in%unpass_siat), ]
 L = lapply((1:length(clean_seq0)), function(i) as.character(clean_seq0[[i]]) )
 
 write.fasta(L, names = names(clean_seq0), file.out=paste("nt_",prefix,"_clean0.fasta", sep=""))
-
+#align with MAFFT on Ugene & trim extremities outside the CDS
 tmp.aln <- readDNAStringSet (paste("nt_",prefix,"_clean0.fasta", sep=""))
 
 ### identify outliers
@@ -82,10 +82,10 @@ outliers = function(sq, n = 50, q = 0.9, score = 4){
   return( as.character(filter(md2, z >= score)$tip) )
 }
 
-spill <- outliers(tmp.aln)
+spill <- outliers(tmp.aln, n=100, score=3.5)
 
 clean_meta <- clean_meta0[ !(clean_meta0$Isolate_Id %in% c(spill)), ]
-(clean_seq <- full_aln[clean_meta$Isolate_Id])
+(clean_seq <- tmp.aln[clean_meta$Isolate_Id])
 
 L = lapply((1:length(clean_seq)), function(i) as.character(clean_seq[[i]]) )
 
@@ -94,20 +94,37 @@ fwrite(clean_meta, paste("data_",prefix,"_clean.csv", sep="") )
 
 
 ### Random subsample max 20 seq/month/reg
+nb_per_month_reg <- matrix(0,nrow=ncol(reg), ncol=(2019.25-2013.5-(3/12))*12)
+rownames(nb_per_month_reg)<- colnames(reg)
+colnames(nb_per_month_reg)<- round(seq(from=2013.5+(3/12), to=2019.25-(1/12), by=1/12), digits=2)
+for(r in colnames(reg)){
+  sub <- clean_meta0[(clean_meta0$Region == r),]
+  col<-0
+  for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
+    col<-col+1
+    sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
+    nb_per_month_reg[r,col]<- nrow(sub_month)
+  }
+}
+nb_per_month_reg
+fwrite(nb_per_month_reg, 'nb_seq_per_month_reg.csv')
 
 subsamp_meta <- meta[0,]
 for (r in colnames(reg) ){
   sub <- clean_meta[(clean_meta$Region == r),]
-  for (y in seq(from=2015.5-(1/12), to=2018.5, by=1/12)){
-    sub_month <- sub[sub$Decimal_Date <y & sub$Decimal_Date >= y-(1/12), ]
+  col<-0
+  for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
+    col<- col+1
+    thresh <- max(c(round(quantile(unlist(nb_per_month_reg[, max(c(0,col-5)):min(c(ncol(nb_per_month_reg),col+5))]), probs=seq(from=0, to=1, by=1/9))[7]), 30))
+    sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
     nbs <- nrow(sub_month)
-    if (nbs>20){
-      order = sample.int(nbs, 20)
+    if (nbs>thresh){
+      order = sample.int(nbs, thresh)
       subsamp_meta <- bind_rows( subsamp_meta, sub_month[order, ] )
     } else subsamp_meta <- bind_rows(subsamp_meta, sub_month)
-    print(c(r,nbs))
   }
 }
+ 
 hist(subsamp_meta$Decimal_Date, breaks=60)
 
 (subsamp_seq <- clean_seq[subsamp_meta$Isolate_Id])

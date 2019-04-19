@@ -314,7 +314,7 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim){
 }
 
 proba.obs <- function(Donor, Rec, LPM){
-  if(PM[Donor,Rec]>1){
+  if(PM[Donor,Rec]>=1){
     L <- likelihood.obs(Donor,Rec,LPM, listClades)
     sim <- likelihood.sim(Donor,Rec, LPM, 1000)
     #hist(sim, breaks=50, main=c(Donor, Rec))
@@ -371,44 +371,118 @@ fitness_random <- function(nsim=100){
   
   nodes <- runif(nsim)
   chain_length <- rnorm(nsim,40,10)
-  
-  
 }
 
-gd_children <- function(node,tree=tre.tt){
-  children <- tree$edge[which(tree$edge[,1]==node),2]
-  gd_children <- unlist(sapply(children, function(c) tree$edge[which(tree$edge[,1]==c),2]))
-  list(node=node, ch=children, gd_ch=gd_children)
-}
-
-check_within <- function(nodes, reg, GS){
-  w <- c()
-  for (n in nodes) if(GS[strtoi(n)]==reg) w<- c(w,n)
-  w
-}
 
 fitness_evol <- function(Donor, Rec, LPM, plot=FALSE){
-  if(PM[Donor,Rec]<1) return(NA)
-  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
-  fit <- c()
-  t <- c()
-  slope <- c()
-  r2 <- c()
-  CI95 <- c()
+  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
+  slope_m <- c(); r2_m <- c(); CI95_m <- c() #initialise the output values
+  slope_s <- c(); r2_s <- c(); CI95_s <- c()
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
+  
   for (c in clades){
-    tips <- grep('EPI',membersClades[[c]], value=TRUE)
-    fit <- Fitness[tips]-Fitness[c]
-    t <- meta_tree[tips,]$Decimal_Date - meta_tree[c,]$Decimal_Date
-    reg <- lm(fit~t+0)
+    #compute the evolution in the migrating clade
+    node_P <- getParent(tre.tt,nodelab.to.numb(c))
+    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
+    if(length(tips_m)<2) next()
+    fit_m <- Fitness[tips_m]-Fitness[node_P]
+    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
+    reg_m <- lm(fit_m~t_m+0)
     if(plot){
       plot(t,fit,main=paste('migration from',Donor,'to',Rec,c), sub=paste('r^2:',round(summary(reg)$r.squared, digits=2),'95%CI:', unlist(round(confint(reg), digits=2))) )
       abline(reg)
     }
+    slope_m <- c(slope_m, reg_m$coefficients)
+    r2_m <- c(r2_m, summary(reg_m)$r.squared)
+    CI95_m <- c(CI95_m, confint(reg_m) )
+  }
+  if(length(slope_m)==0) return(NA)
+  list(slope_m=slope_m, r2_m=r2_m, CI95_m=CI95_m)
+}
 
+
+fitness_sister <- function(Donor, Rec, LPM){
+  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
+  slope <- c(); r2 <- c(); CI95 <- c() #initialise the output values
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
+  
+  for (c in clades){
+    node_P <- getParent(tre.tt,nodelab.to.numb(c))
+    nodes <- nodes.sameReg(Donor, node_P, GS, tre.sm)
+    tips <- nodes[nodes<=length(tre.sm$tip.label)]
+    if(length(tips)<2) next()
+    fit <- Fitness[tips]-Fitness[node_P]
+    t <- meta_tree[tips,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
+    reg <- lm(fit~t+0)
     
     slope <- c(slope, reg$coefficients)
     r2 <- c(r2, summary(reg)$r.squared)
     CI95 <- c(CI95, confint(reg) )
   }
+  if(is.null(slope)) return(NA)
   list(slope=slope, r2=r2, CI95=CI95)
-} 
+}
+
+
+fitness_evol_sis <- function(Donor, Rec, LPM, plot=FALSE){
+  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
+  slope <- c(); CI95 <- c() #initialise the output values
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
+  
+  for (c in clades){
+    #compute the evolution in the migrating clade
+    node_P <- getParent(tre.tt,nodelab.to.numb(c))
+    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
+    fit_m <- Fitness[tips_m]-Fitness[node_P]
+    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
+    if(length(tips_m)<2) next()
+    reg_m <- lm(fit_m~t_m+0)
+    
+    #compute the evolution in the sister clade
+    nodes <- nodes.sameReg(Donor, node_P, GS, tre.sm)
+    tips_s <- nodes[nodes<=length(tre.sm$tip.label)]
+    if(length(tips_s)<2) next()
+    fit_s <- Fitness[tips_s]-Fitness[node_P]
+    t_s <- meta_tree[tips_s,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
+    reg_s <- lm(fit_s~t_s+0)
+    
+    slope <- c(slope, reg_m$coefficients-reg_s$coefficients)
+    CI95 <- c(CI95, confint(reg_m)-confint(reg_s) )
+  }
+  if(is.null(slope)) return(NA)
+  list(slope=slope, CI95=CI95)
+}
+
+fitness_evol_global <- function(Donor, Rec, LPM, plot=FALSE){
+  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
+  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
+  slope <- c(); CI95 <- c() #initialise the output values
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
+  
+  for (c in clades){
+    #compute the evolution in the migrating clade
+    node_P <- getParent(tre.tt,nodelab.to.numb(c))
+    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
+    fit_m <- Fitness[tips_m]-Fitness[node_P]
+    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
+    reg_m <- lm(fit_m~t_m+0)
+    
+    #compute the global evolution during that period of time in the same vax strain clade
+    VaxStrain <- meta_tree[c,]$VaxStrain
+    tips_vax_strain <- rownames(meta_tree[1:length(tre.tt$tip.label),])[meta_tree[1:length(tre.tt$tip.label),]$VaxStrain==VaxStrain]
+    tips_s <- tips_vax_strain[meta_tree[tips_vax_strain,]$Decimal_Date> meta_tree[node_P,]$Decimal_Date & meta_tree[tips_vax_strain,]$Decimal_Date < max(meta_tree[tips_m,]$Decimal_Date)]
+    if(length(tips_s)<3) next()
+    root_VS <- rownames(meta_tree[meta_tree$VaxStrain==VaxStrain,])[which(meta_tree[meta_tree$VaxStrain==VaxStrain,]$Decimal_Date==min(meta_tree[meta_tree$VaxStrain==VaxStrain,]$Decimal_Date))]
+    fit_s <- Fitness[tips_s] - Fitness[root_VS]
+    t_s <- meta_tree[tips_s,]$Decimal_Date - meta_tree[root_VS,]$Decimal_Date
+    reg_s <- lm(fit_s~t_s+0)
+    
+    slope <- c(slope, reg_m$coefficients-reg_s$coefficients)
+    CI95 <- c(CI95, confint(reg_m)-confint(reg_s) )
+  }
+  if(is.null(slope)) return(NA)
+  list(slope=slope, CI95=CI95)
+}
