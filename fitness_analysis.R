@@ -78,7 +78,7 @@ E <- matrix(0, nrow=nreg, ncol=nreg)
 rownames(E) <- levels(region)
 colnames(E) <- levels(region)
 slope <- array(0,dim=c(nreg, nreg, 3), dimnames=list(levels(region), levels(region), c('inf','equal','sup')))
-VS_slopes <- sapply(unique(meta_tree$VaxStrain), function(VS) VS_slope(VS))
+# VS_slopes <- sapply(unique(meta_tree$VaxStrain), function(VS) VS_slope(VS))
 
 # setwd("./fitness_evol")
 for (t in 1:nsim){
@@ -99,27 +99,27 @@ for (t in 1:nsim){
   x <- sapply(levels(region), function(r) sapply(levels(region), function(d) proba.obs(d,r,LPM)))
   cnt[!is.na(x)] <- 1
   x[is.na(x)] <- 0
-  sup <- (x<0.95)*rep(1, length(x))
+  sup <- ( x>0.1)*rep(1, length(x))
   C <- C+sup
   D <- D+cnt
 
-  #plot the fitness evolution after migration
+  # plot the fitness evolution after migration
   # pdf('fitness_evol_plots_sm1.1.pdf')
   # DonorVS <- DonorVS_slopes2()
-  # 
-  # for(don in levels(region)) for(rec in levels(region)){
-  #   if(don==rec) next()
-  #   FE <- fitness_evol_vs_VS(don, rec, LPM, VS_slopes)
-  #   if(!is.na(FE[1])) {
-  #     E[don, rec] <- E[don, rec]+1
-  #     nbobs <- length(FE$slope)
-  #     for(i in 1:nbobs){
-  #       if (FE$slope[i]<0 & FE$CI95[2*i]<0) {slope[don,rec,'inf'] <- slope[don,rec,'inf'] + 1/nbobs
-  #       } else if (FE$slope[i]>0 & FE$CI95[2*i-1]>0) {slope[don,rec,'sup'] <- slope[don,rec,'sup'] + 1/nbobs
-  #       } else slope[don,rec,'equal'] <- slope[don,rec,'equal'] + 1/nbobs
-  #     }
-  #   }
-  # }
+
+  for(don in levels(region)) for(rec in levels(region)){
+    if(don==rec) next()
+    FE <- fitness_evol_vs_TimeSlice(don, rec, LPM)
+    if(!is.na(FE[1])) {
+      E[don, rec] <- E[don, rec]+1
+      nbobs <- length(FE$slope)
+      for(i in 1:nbobs){
+        if (FE$slope[i]<0 & FE$CI95[2*i]<0) {slope[don,rec,'inf'] <- slope[don,rec,'inf'] + 1/nbobs
+        } else if (FE$slope[i]>0 & FE$CI95[2*i-1]>0) {slope[don,rec,'sup'] <- slope[don,rec,'sup'] + 1/nbobs
+        } else slope[don,rec,'equal'] <- slope[don,rec,'equal'] + 1/nbobs
+      }
+    }
+  }
   # dev.off()
 }
 
@@ -131,7 +131,7 @@ yax <- list(title='Donor', titlefont= list(size=20), tickfont=list(size=15))
 f0 = list(size=25)
 
 Ctrim <- C
-for(i in 1:(nreg*nreg)) if(D[i] < 50) Ctrim[i]<-NA
+for(i in 1:(nreg*nreg)) if(D[i] < 70) Ctrim[i]<-NA
 
 p <- plotly::plot_ly(z=Ctrim/D, type='heatmap', x=levels(region), y=levels(region), colors = c('red','green'), zmin=0, zmax=1) %>%
   layout(title='Frequency among the stochastic mappings that the probability of the migrants fitnesses given the donor region fitness distribution is >5%', xaxis=xax, yaxis=yax)
@@ -147,7 +147,7 @@ print(p)
 # round(slope, digits=2)
 
 Strim <- slope
-for(i in 1:(nreg*nreg)) if(E[i] < 50) {Strim[,,1][i]<-NA; Strim[,,2][i]<-NA; Strim[,,3][i]<-NA}
+for(i in 1:(nreg*nreg)) if(E[i] < 70) {Strim[,,1][i]<-NA; Strim[,,2][i]<-NA; Strim[,,3][i]<-NA}
 
 p <- plotly::plot_ly(z=Strim[,,'inf'], zmin=0, zmax=1, type='heatmap', x=levels(region), y=levels(region), colors = c('red','green')) %>%
   layout(title='frequency of evolution significantly negative', xaxis=xax, yaxis=yax)

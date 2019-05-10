@@ -75,7 +75,7 @@ dates.edges <- function(tree=tre.sm, meta=meta_tree){
   rw=0
   for(maps in tree$maps){
     rw=rw+1
-    d <- meta$Decimal_Date[rw]
+    d <- meta_tree$Decimal_Date[tree$edge[rw,1]] #take the date of the beginning of the edge
     for(reg in 1:length(maps)){
       DR[rw,names(maps[reg]),1] <- d
       d <- d+maps[reg]
@@ -83,23 +83,6 @@ dates.edges <- function(tree=tre.sm, meta=meta_tree){
     }
   }
   DR
-}
-
-select.date <- function(start, stop, dates.reg){
-  # selects the nodes and tips from a region within a given period of time
-  select_reg <- c()
-  for (i in 1: nrow(dates.reg)){
-    if( !is.na(dates.reg[i,1]) ){
-      if (dates.reg[i,1]<start & dates.reg[i,2]>stop) {
-        select_reg <- c(select_reg, names(dates.reg[i,1]))
-      } else if (dates.reg[i,1]>start & dates.reg[i,1]<stop){
-        select_reg <- c(select_reg, names(dates.reg[i,1]))
-      } else if (dates.reg[i,2]>start & dates.reg[i,2]<stop){
-        select_reg <- c(select_reg, names(dates.reg[i,1]))
-      }
-    }
-  }
-  select_reg
 }
 
 DNAbin2Aln <- function(list_seq){
@@ -229,15 +212,17 @@ tips.keep <- function(HACnb, mode=c('booth', 'tips', 'nodes')){
 }
 
 ## Analysis of the fitness distribution
-test.date <- function(start, end, date, tol){
+test.date.inRange <- function(start, end, date, tol){
   if(is.na(start)) return(FALSE)
   if({start>date-tol/2 & start<date+tol/2} | {end>date-tol/2 & end<date+tol/2} | {start<date-tol/2 & end>date+tol/2}) return(TRUE)
   FALSE
 }
 
 fitness.distr <- function(VaxStrain, reg, ageRoot, tol=0.125){
-  edges.in <- apply(dt.edges[,reg,], 1, function(e) {test.date(e[1],e[2],ageRoot, tol)})
-  nodes <- rownames(meta_tree)[grepl(VaxStrain,meta_tree$VaxStrain[-(length(tre.tt$tip.label)+1)]) & edges.in]
+  # give a list of the fitnesses of the donor region around the same period as ageRoot, in the same vaccine strain
+  edges.in <- apply(dt.edges[,reg,], 1, function(e) test.date.inRange(e[1],e[2],ageRoot, tol) )
+  edges.in <- edges.in[rownames(meta_tree)]; edges.in[length(tre.tt$tip.label)+1] <- FALSE #reorder in the order of meta_tree, set the tree root to false
+  nodes <- rownames(meta_tree)[grepl(VaxStrain,meta_tree$VaxStrain) & edges.in]
   Fitness[nodes]
 }
 
@@ -276,22 +261,14 @@ time.slices <- function(HACs.tips, tree, file){
   setwd(wd) #go back to the actual working directory
 }
 
-
-P <- function(fitnessClade, fitnessObs){
-  #Compute the probability of a fitness value given the distribution within the clade
-  d <- stats::density(fitnessClade, from=-40, to=10, n=501)
-  rk <- (round(fitnessObs, digits = 1)+40)*10+1
-  d$y[rk]
-}
-
 likelihood.obs <- function(Donor, Rec, LPM, listClades){
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
   L = 1
   for (c in clades){
     fitnessRoot <- Fitness[c]
-    fitnessClade <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
-    if(length(fitnessClade)<10) next()
-    L = L * P(fitnessClade, fitnessRoot)
+    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
+    if(length(fitnessDon)<10) next()
+    L = L * (1-ecdf(fitnessDon)(fitnessRoot))
   }
   log(L)
 }
@@ -301,14 +278,11 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim){
   Lmatrix = matrix(data=0, nrow=length(clades), ncol=nsim)
   rownames(Lmatrix)=clades
   for (c in clades){
-    fitnessClade <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
-    if(length(fitnessClade)<10) next()
-    R <- runif(nsim)
-    e <- ecdf(fitnessClade)
-    X <- seq(min(fitnessClade), max(fitnessClade), length.out=100)
-    Y <- e(X)
-    fsim <- sapply(R, function(r) X[which.min((Y-r)^2)])
-    Lmatrix[c,] <- sapply(fsim, function(x) log(P(fitnessClade, x)))
+    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
+    if(length(fitnessDon)<10) next()
+    R <- sapply(1:nsim, function(i) sample.int(length(fitnessDon),1))
+    e <- ecdf(fitnessDon)
+    Lmatrix[c,] <- log(1-e(fitnessDon[R]))
   }
   apply(Lmatrix, 2, function(x) sum(x))
 }
@@ -316,7 +290,7 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim){
 proba.obs <- function(Donor, Rec, LPM){
   if(PM[Donor,Rec]>=1){
     L <- likelihood.obs(Donor,Rec,LPM, listClades)
-    sim <- likelihood.sim(Donor,Rec, LPM, 1000)
+    sim <- likelihood.sim(Donor,Rec, LPM, 100)
     #hist(sim, breaks=50, main=c(Donor, Rec))
     e <- ecdf(sim)
     return(e(L))
@@ -418,99 +392,6 @@ fitness_evol <- function(Donor, Rec, LPM, plot=FALSE){
   list(slope_m=slope_m, r2_m=r2_m, CI95_m=CI95_m)
 }
 
-
-fitness_sister <- function(Donor, Rec, LPM){
-  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
-  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
-  slope <- c(); r2 <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
-  
-  for (c in clades){
-    node_P <- getParent(tre.tt,nodelab.to.numb(c))
-    nodes <- nodes.sameReg(Donor, node_P, GS, tre.sm)
-    tips <- nodes[nodes<=length(tre.sm$tip.label)]
-    if(length(tips)<2) next()
-    fit <- Fitness[tips]-Fitness[node_P]
-    t <- meta_tree[tips,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    reg <- lm(fit~t+0)
-    
-    slope <- c(slope, reg$coefficients)
-    r2 <- c(r2, summary(reg)$r.squared)
-    CI95 <- c(CI95, confint(reg) )
-  }
-  if(is.null(slope)) return(NA)
-  list(slope=slope, r2=r2, CI95=CI95)
-}
-
-
-fitness_evol_sis <- function(Donor, Rec, LPM, plot=FALSE){
-  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
-  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
-  slope <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
-  
-  for (c in clades){
-    #compute the evolution in the migrating clade
-    node_P <- getParent(tre.tt,nodelab.to.numb(c))
-    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-    fit_m <- Fitness[tips_m]-Fitness[node_P]
-    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    if(length(tips_m)<5) next()
-    reg_m <- lm(fit_m~t_m+0)
-    
-    #compute the evolution in the sister clade
-    nodes <- nodes.sameReg(Donor, node_P, GS, tre.sm)
-    tips_s <- nodes[nodes<=length(tre.sm$tip.label)]
-    if(length(tips_s)<3) next()
-    fit_s <- Fitness[tips_s]-Fitness[node_P]
-    t_s <- meta_tree[tips_s,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    reg_s <- lm(fit_s~t_s+0)
-    
-    slope <- c(slope, reg_m$coefficients-reg_s$coefficients)
-    CI95 <- c(CI95, confint(reg_m)-confint(reg_s) )
-  }
-  if(is.null(slope)) return(NA)
-  list(slope=slope, CI95=CI95)
-}
-
-fitness_evol_global <- function(Donor, Rec, LPM, plot=FALSE){
-  # Compare the slope of fitness evolution within the migrant clade vs the global 
-  # evolution at the same time period in the same vaccine strain
-  
-  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
-  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
-  slope <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
-  
-  for (c in clades){
-    #compute the evolution in the migrating clade
-    node_P <- getParent(tre.tt,nodelab.to.numb(c))
-    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-    fit_m <- Fitness[tips_m]-Fitness[node_P]
-    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    if(length(tips_m)<5) next()
-    reg_m <- lm(fit_m~t_m+0)
-    print(unlist(round(confint(reg_m), digits=2)))
-    if (plot) plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec), sub=paste('95%CI:', unlist(round(confint(reg_m), digits=2))[1:2]) ); abline(reg_m)
-    
-    #compute the global evolution during that period of time in the same vax strain clade
-    VaxStrain <- meta_tree[c,]$VaxStrain
-    tips_vax_strain <- tre.tt$tip.label[c(meta_tree[1:length(tre.tt$tip.label),]$VaxStrain==VaxStrain,rep(FALSE, length(tre.tt$node.label)))]
-    tips_s <- tips_vax_strain[meta_tree[tips_vax_strain,]$Decimal_Date> meta_tree[node_P,]$Decimal_Date & meta_tree[tips_vax_strain,]$Decimal_Date < max(meta_tree[tips_m,]$Decimal_Date)]
-    if(length(tips_s)<5) next()
-    root_VS <- rownames(meta_tree[meta_tree$VaxStrain==VaxStrain,])[which(meta_tree[meta_tree$VaxStrain==VaxStrain,]$Decimal_Date==min(meta_tree[meta_tree$VaxStrain==VaxStrain,]$Decimal_Date))]
-    fit_s <- Fitness[tips_s] - Fitness[root_VS]
-    t_s <- meta_tree[tips_s,]$Decimal_Date - meta_tree[root_VS,]$Decimal_Date
-    reg_s <- lm(fit_s~t_s+0)
-    if(plot) plot(t_s, fit_s, main=paste('global fitness evolution in vax strain', VaxStrain), sub=paste('95%CI:', unlist(round(confint(reg_s), digits=2))) ); abline(reg_s)
-    
-    slope <- c(slope, reg_m$coefficients-reg_s$coefficients)
-    CI95 <- c(CI95, confint(reg_m)-confint(reg_s) )
-  }
-  if(is.null(slope)) return(NA)
-  list(slope=slope, CI95=CI95)
-}
-
 VS_slope <- function(VS, plot=FALSE){
   # #find the strain root to set it to 0
   # nodes <- meta_tree[meta_tree$VaxStrain==VS,]#meta data rows concerning the vaccine strain nodes
@@ -543,7 +424,7 @@ VS_slope <- function(VS, plot=FALSE){
 
 fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
   # Compare the slope of fitness evolution within the migrant clade vs the global 
-  # evolution at the same time period in the same vaccine strain
+  # evolution in the same vaccine strain
   
   if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
@@ -558,8 +439,12 @@ fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
     t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
     if(length(tips_m)<5) next()
     reg_m <- lm(fit_m~t_m+0)
-    if (plot) plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec), sub=paste('95%CI:', unlist(round(confint(reg_m), digits=2))[1:2]) ); abline(reg_m)
+    if (plot) {
+      plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec), sub=paste('95%CI:', unlist(round(confint(reg_m), digits=2))[1:2]) )
+      abline(reg_m)
+    }
     
+    VS <- meta_tree[c,]$VaxStrain
     slope <- c(slope, reg_m$coefficients - VS_slopes[1,VS][[1]])
     CI95 <- c(CI95, confint(reg_m) - unlist(VS_slopes[2:3,VS]) )
   }
@@ -567,14 +452,47 @@ fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
   list(slope=slope, CI95=CI95)
 }
 
-fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
-  # Compare the slope of fitness evolution within the migrant clade vs the overall vaccine 
-  # strain evolution
+edges_same_time <- function(clade){
+  # return the list of edges (identified by the child name) observed at the same 
+  #time as the node of the clade of interest
+  date <- meta_tree[clade,'Decimal_Date']
+  nodes.bool <- apply(dt.edges,c(1,2), function(e) {
+                    if(!anyNA(e)){
+                      if(e[1]<date & e[2]>date) return(TRUE)}
+                    })
+  nodes <- rownames(dt.edges)[apply(nodes.bool,1,
+                    function(r) {
+                      if(!is.null(unlist(r))) return(TRUE)
+                      FALSE
+                    }          
+                                )]
+  nodes[!nodes==clade]
+  #keep only the edges between nodes, and give the parent of the edge
+  unique(unlist(sapply(nodes, function(n){
+                     if(grepl('NODE',n)) getParent(tre.tt, nodelab.to.numb(n))
+  })))
+}
+
+Descendants_timeSlice <- function(node, SliceEnd, tree=tre.tt, elts=node){
+  children <- tree$edge[which(tree$edge[,1]==node),2]
+  w <- children[which(meta_tree$Decimal_Date[children]<SliceEnd)]
+  elts <- c(elts, w)
+  if (length(w>0)){
+    for (i in w) {
+      elts <- Descendants_timeSlice(i, SliceEnd, tree, elts)
+    }
+  }
+  return(elts)
+}
+
+
+fitness_evol_vs_TimeSlice <- function(Donor, Rec, LPM, plot=FALSE){
+  # Compare the slope of fitness evolution within the migrant clade vs the global 
+  # evolution at the same time period (time slice)
   
   if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
   slope <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
   
   for (c in clades){
     #compute the evolution in the migrating clade
@@ -584,120 +502,37 @@ fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
     t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
     if(length(tips_m)<5) next()
     reg_m <- lm(fit_m~t_m+0)
-    if (plot) {plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec), sub=paste('95%CI:', unlist(round(confint(reg_m), digits=2))[1:2]) ); abline(reg_m)}
-    
-    VS <- meta_tree[c,]$VaxStrain #identify the vaccine strain
-    slope <- c(slope, reg_m$coefficients - VS_slopes[1,VS][[1]])
-    CI95 <- c(CI95, confint(reg_m) - unlist(VS_slopes[2:3,VS]) )
-  }
-  if(is.null(slope)) return(NA)
-  list(slope=slope, CI95=CI95)
-}
-
-DonorVS_slopes <- function(){
-  #using the mean of the slopes
-  M <- matrix(0,ncol=9, nrow=5)
-  E <- matrix(0,ncol=9, nrow=5)
-  rownames(M)<- unique(meta_tree$VaxStrain); colnames(M)<- levels(region)
-  rownames(E)<- unique(meta_tree$VaxStrain); colnames(E)<- levels(region)
-  
-  for(don in levels(region)){
-    clades <- clades <- LPM[toString(don), , ][!is.na(LPM[toString(don), , ])]
-    
-    for (c in clades){
-      VS <- meta_tree[c,]$VaxStrain #identify the vaccine strain
-      node_P <- getParent(tre.tt,nodelab.to.numb(c)) #find the parent node
-      tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-      if(length(tips_m)<2) next()
-      fit_m <- Fitness[tips_m]-Fitness[node_P]
-      t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-      reg_m <- lm(fit_m~t_m+0)
-      M[VS,don] <- M[VS,don] + reg_m$coefficients
-      E[VS, don] <- E[VS, don] +1
+    if (plot) {
+      plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec))
+      abline(reg_m)
     }
-  }
-  M/E
-}
-
-DonorVS_slopes2 <- function(){
-  #using the slope after aggregating the data, only with the identified clades
-  M <- matrix(NA,ncol=9, nrow=5)
-  rownames(M)<- unique(meta_tree$VaxStrain); colnames(M)<- levels(region)
-  
-  for(don in levels(region)){
-    clades <- clades <- LPM[toString(don), , ][!is.na(LPM[toString(don), , ])]
     
-    for(VS in unique(meta_tree$VaxStrain)){
-      fit_m <- c()
-      t_m <- c()
-      
-      for (c in clades){
-        if(meta_tree[c,]$VaxStrain != VS) next()
-        node_P <- getParent(tre.tt,nodelab.to.numb(c)) #find the parent node
-        tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-        if(length(tips_m)<2) next()
-        fit_m <- c(fit_m, Fitness[tips_m]-Fitness[node_P])
-        t_m <- c(t_m, meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date)
+    #compute the global evolution in the same time slice
+    end=max(t_m) + meta_tree[node_P,]$Decimal_Date
+    edges <- edges_same_time(c)
+    if(length(edges)<2) return(NA)
+    tips_c <- sapply(edges, function(e){
+                    tips <- Descendants_timeSlice(e, end)
+                    tips <- tips[tips<=length(tre.tt$tip.label)] #keep only the tips
+                    if(length(tips)>5) return(c(e,tips)) #add the root of the clade for subsequent analysis
+                    })
+    fit_c <- c()
+    t_c <- c()
+    for(e in tips_c){
+      if(!is.null(e)){
+        fit_c <- c(fit_c, Fitness[e[-1]] - Fitness[e[1]])
+        t_c <- c(t_c, meta_tree$Decimal_Date[e[-1]] -  meta_tree$Decimal_Date[e[1]])
       }
-      if(is.null(t_m)) next()
-      reg_m <- lm(fit_m~t_m+0)
-      M[VS,don] <- reg_m$coefficients
     }
-  }
-  M
-}
-
-
-DonorVS_slopes3 <- function(){
-  #using the slope after aggregating the data
-  M <- matrix(NA,ncol=9, nrow=5)
-  rownames(M)<- unique(meta_tree$VaxStrain); colnames(M)<- levels(region)
-  
-  for(don in levels(region)){
-    clades <- clades <- LPM[toString(don), , ][!is.na(LPM[toString(don), , ])]
-    
-    for(VS in unique(meta_tree$VaxStrain)){
-      fit_m <- c()
-      t_m <- c()
-      
-      for (c in clades){
-        if(meta_tree[c,]$VaxStrain != VS) next()
-        node_P <- getParent(tre.tt,nodelab.to.numb(c)) #find the parent node
-        tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-        if(length(tips_m)<2) next()
-        fit_m <- c(fit_m, Fitness[tips_m]-Fitness[node_P])
-        t_m <- c(t_m, meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date)
-      }
-      if(is.null(t_m)) next()
-      reg_m <- lm(fit_m~t_m+0)
-      M[VS,don] <- reg_m$coefficients
+    if(is.null(t_c)) return(NA)
+    reg_c <- lm(fit_c~t_c+0)
+    if (plot) {
+      plot(t_c, fit_c, main='fitness evolution in the sale time slice')
+      abline(reg_c)
     }
-  }
-  M
-}
-
-fitness_evol_vs_don <- function(Donor, Rec, LPM, DonorVS, plot=FALSE){
-  # Compare the slope of fitness evolution within the migrant clade vs the mean donor evolution
-  # in the same vaccine strain
-  
-  if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
-  clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
-  slope <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
-  
-  for (c in clades){
-    #compute the evolution in the migrating clade
-    node_P <- getParent(tre.tt,nodelab.to.numb(c))
-    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
-    fit_m <- Fitness[tips_m]-Fitness[node_P]
-    t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    if(length(tips_m)<5) next()
-    reg_m <- lm(fit_m~t_m+0)
-    if (plot) {plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec), sub=paste('95%CI:', unlist(round(confint(reg_m), digits=2))[1:2]) ); abline(reg_m)}
     
-    VS <- meta_tree[c,]$VaxStrain #identify the vaccine strain
-    slope <- c(slope, reg_m$coefficients - DonorVS[VS,Donor])
-    CI95 <- c(CI95, confint(reg_m) - DonorVS[VS,Donor] )
+    slope <- c(slope, reg_m$coefficients - reg_c$coefficients)
+    CI95 <- c(CI95, confint(reg_m) - confint(reg_c) )
   }
   if(is.null(slope)) return(NA)
   list(slope=slope, CI95=CI95)

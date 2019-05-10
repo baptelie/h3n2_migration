@@ -59,7 +59,7 @@ L = lapply((1:length(clean_seq0)), function(i) as.character(clean_seq0[[i]]) )
 write.fasta(L, names = names(clean_seq0), file.out=paste("nt_",prefix,"_clean0.fasta", sep=""))
 #align with MAFFT on Ugene & trim extremities outside the CDS
 tmp.aln <- readDNAStringSet (paste("nt_",prefix,"_clean0.fasta", sep=""))
-
+clean_seq
 ### identify outliers
 outliers = function(sq, n = 50, q = 0.9, score = 4){
   library(ape); library(dplyr)
@@ -91,14 +91,15 @@ L = lapply((1:length(clean_seq)), function(i) as.character(clean_seq[[i]]) )
 
 write.fasta(L, names = names(clean_seq), file.out=paste("nt_",prefix,"_clean.fasta", sep=""))
 fwrite(clean_meta, paste("data_",prefix,"_clean.csv", sep="") )
+clean_meta <- read.csv('data_world_13-19_clean.csv')
+clean_seq <- readDNAStringSet (paste("nt_",prefix,"_clean.fasta", sep=""))
 
-
-### Random subsample max 20 seq/month/reg
+### Random subsample
 nb_per_month_reg <- matrix(0,nrow=ncol(reg), ncol=(2019.25-2013.5-(3/12))*12)
 rownames(nb_per_month_reg)<- colnames(reg)
 colnames(nb_per_month_reg)<- round(seq(from=2013.5+(3/12), to=2019.25-(1/12), by=1/12), digits=2)
 for(r in colnames(reg)){
-  sub <- clean_meta0[(clean_meta0$Region == r),]
+  sub <- clean_meta[(clean_meta$Region == r),]
   col<-0
   for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
     col<-col+1
@@ -107,15 +108,16 @@ for(r in colnames(reg)){
   }
 }
 nb_per_month_reg
-fwrite(nb_per_month_reg, 'nb_seq_per_month_reg.csv')
-
-subsamp_meta <- meta[0,]
+# fwrite(nb_per_month_reg, 'nb_seq_per_month_reg.csv')
+subsamp_meta <- clean_meta[0,]
 for (r in colnames(reg) ){
   sub <- clean_meta[(clean_meta$Region == r),]
   col<-0
+  Tr <- c()
   for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
     col<- col+1
-    thresh <- max(c(round(quantile(unlist(nb_per_month_reg[, max(c(0,col-5)):min(c(ncol(nb_per_month_reg),col+5))]), probs=seq(from=0, to=1, by=1/9))[7]), 30))
+    thresh <- min(max(c(round(quantile(unlist(nb_per_month_reg[, max(c(0,col-5)):min(c(ncol(nb_per_month_reg),col+6))]), probs=seq(from=0, to=1, by=1/3))[3]), 10)),30)
+    Tr <- c(Tr, thresh)
     sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
     nbs <- nrow(sub_month)
     if (nbs>thresh){
@@ -126,7 +128,7 @@ for (r in colnames(reg) ){
 }
  
 hist(subsamp_meta$Decimal_Date, breaks=60)
-
+Tr
 (subsamp_seq <- clean_seq[subsamp_meta$Isolate_Id])
 
 L = lapply((1:length(subsamp_seq)), function(i) as.character(subsamp_seq[[i]]) )
