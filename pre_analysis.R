@@ -1,26 +1,22 @@
 library(ape) ;  library(magrittr); library(lubridate); library(seqinr)
-library(Biostrings); library(dplyr); library(data.table)
+library(Biostrings); library(dplyr); library(data.table); library(DECIPHER)
 
-prefix = "world_13-19"
+prefix = "_12-19"
 
 setwd(paste("~/Documents/Phylogeny/", prefix, sep=""))
-meta = read.csv(paste("data_",prefix,".csv", sep=""))
-reg = read.csv("/Users/belie/Documents/Phylogeny/states_per_regBedford.csv")
-(full_aln <- readDNAStringSet (paste("nt_", prefix, ".fasta", sep="")))
+meta = read.csv(paste("meta_12-19",'.csv', sep=""))
+reg = read.csv("states_per_regBedford.csv")
+(full_seq <- readDNAStringSet (paste("nt_12-19", ".fasta", sep="")))
 
 ### Remove duplicates
 meta <- meta[ !duplicated(meta$Isolate_Id), ]
-(full_aln <- full_aln[meta$Isolate_Id])
-
-### Remove ambiguous sequences
-unambiguousl <- sapply(full_aln, function(seq) grepl("R|Y|S|W|K|M|B|D|H|V|N", seq))
-ambiguous <- names(full_aln[unambiguousl])
+(full_seq <- full_seq[meta$Isolate_Id])
 
 ### Idfentify the incomplete dates
-sts <- decimal_date(ymd(meta$Collection_Date))
+sts <- decimal_date(mdy(meta$Collection_Date))
 names(sts) <- meta$Isolate_Id
-hist( sts , main = 'Time of sequence sampling', breaks=100) 
-incompl_date <- c( names(which(is.na(sts))), names(which(sts>2019.5)) )
+hist( sts , main = 'Time of sequence sampling', breaks=200) 
+incompl_date <- c( names(which(is.na(sts))), names(which(sts>2019 & sts<2012)) )
 meta$Decimal_Date <- sts
 
 ###Identify the incomplete locations (country)
@@ -44,22 +40,68 @@ names(List_reg) <- meta$Isolate_Id
 out_Reg <- names(which(is.na(List_reg)))
 
 ###Remove passaged cells
-keep = list('primary','clinic','SIAT','Original','Clinical','direct','P0','S[1,2,3,4,5,6,7,8,9]','cs')
+pattern=regex('original|o[tr]igial|cs|primary|PI|clinic|^(s|SIAT)\\s*[0-9]$|^SX$|^(s|SIAT)\\s*[0-9]\\s*[[:punct:]]\\s*(s|SIAT)[0-9]|direct|passage details\\:\\s*(s|SIAT)\\s*[0-9]$|SIATX\\s*[[:punct:]]\\s*(SIAT|s)[0-9]|(S|SIAT)[0-9]\\s*[[:punct:]]\\s*(SIAT|S)[1-9]|OR|SX\\/S[1-9]$|^SIAT$|SIATx\\s*[[:punct:]]\\s*SIAT[1-9]|^siat\\s*[0-9]$|SIAT 2 \\+SIAT1  |SIAT0 \\+\\s*[1-9]|SIATX*\\s*[[:punct:]]\\s*SIAT[1-9]|passage details:\\s*S[1-9]|no passage|Not passaged|CS|org|SIAT0 \\+[1-9]$|^S[1-9]\\+S[1-9]$|passage details: MDCK-SIAT1|SIAT1\\/SIAT2 \\+SIAT1|^S[0-9] \\(20|P0\\/SIAT1|^SIAT1SIAT1$|SIAT \\,SIAT[1-9]$|SIAT1-ori|MDCK-SIAT1 passage|MDCK-SIAT1 1 +SIAT1|SIAT\\-2\\, SIAT2|SIAT1\\/S1|SIAT, SIAT[1-9]|SIAT 3\\, SIAT1|passage details: MDCK-Siat/1|^P[1-9]*\\s*[[:punct:]]\\s*SIAT[1-9]$|^SIAT\\s*[1-9]\\s*[[:punct:]]\\s*[1-9]$|^S[1-9]\\s*[[:punct:]]\\s*SIAT[1-9]$|^MDCKSIAT1$|MDCK[1-9]SIAT[1-9]|^P[1-9]\\s*[[:punct:]]\\s*SIAT[1-9]$|initial|SIAT1\\s*[[:punct:]]\\s*MDCK1|^S\\s*[[:punct:]]\\s*SIAT[1-9]|SIAT2-ori|P0|NA extract|SIAT 0\\s*\\+[1-9]|pi|S2\\+2|C[0-9]\\/SIAT[0-9]|SIAT1\\,MDCK1|MDCK\\-SIAT1 2 \\+SIAT1|^C[0-9][[:punct:]]*S[0-9]$|^MDCK\\s*[0-9]\\s*[[:punct:]]\\s*SIAT[0-9]$|passage details\\: MDCK1\\,SIAT1')
 Passage_history <- meta$Passage_History
-names(Passage_history) <- meta$Isolate_Id
-unpass_siat <- unique(unlist(lapply(keep, function(x) names(Passage_history[grepl(x,Passage_history, useBytes=TRUE)]) )))
+keep <- grepl(pattern, x=Passage_history)
 
+unpass_siat <- meta$Isolate_Id[keep]
+
+duplicated.seq <- duplicated(clean_seq0)
+dupl <- c()
+for(seq in names(unique(clean_seq0[duplicated.seq])) ){
+  Ids <- which(clean_seq0==clean_seq0[seq])
+  Ids_names <- names(clean_seq0[Ids])
+  dates <- clean_meta0$Decimal_Date[Ids]
+  R <- list_loc[Ids_names]
+  R <- sapply(R, function(r) r[min(3,length(r))])
+  dupl.dates <- duplicated(dates)
+  for (i in 1:length(Ids)) {
+    for(j in (1:length(Ids))[-i]) if(R[[i]]==R[[j]] & dates[i]==dates[j] & duplicated.seq[i]) dupl <- c(dupl, Ids[i])
+  }
+}
+dupl <- names(clean_seq0[dupl])
 ### Make a first fasta file cleaned to align in ugene
-clean_meta0 <- meta[ !(meta$Isolate_Id %in% c(incompl_date, out_Reg, ambiguous)), ]
+clean_meta0 <- meta[ !(meta$Isolate_Id %in% c(incompl_date, out_Reg, dupl)), ]
 clean_meta0 <- clean_meta0[(clean_meta0$Isolate_Id %in%unpass_siat), ]
-(clean_seq0 <- full_aln[clean_meta0$Isolate_Id])
+(clean_seq0 <- full_seq[clean_meta0$Isolate_Id])
+writeXStringSet(clean_seq0, filepath=paste("nt_",prefix,"_clean0.fasta", sep=""))
+cat('first cleaning saved as ',paste("nt_",prefix,"_clean0.fasta", sep=""))
 
-L = lapply((1:length(clean_seq0)), function(i) as.character(clean_seq0[[i]]) )
-
-write.fasta(L, names = names(clean_seq0), file.out=paste("nt_",prefix,"_clean0.fasta", sep=""))
 #align with MAFFT on Ugene & trim extremities outside the CDS
-tmp.aln <- readDNAStringSet (paste("nt_",prefix,"_clean0.fasta", sep=""))
-clean_seq
+(clean_seq <- readDNAStringSet (paste("nt",prefix,"_clean0.fasta", sep="")))
+clean_seq <- RemoveGaps(clean_seq)
+
+### Remove ambiguous sequences
+#remove the sequences containing gaps
+good <-c()
+for(s in 1:length(clean_seq)){
+  if(length(clean_seq[[s]])== 1701) good <- c(good, s)
+}
+clean_seq <- clean_seq[good]
+
+#remove the sequences containing ambiguous terms
+unambiguousl <- sapply(clean_seq, function(seq) grepl("R|Y|S|W|K|M|B|D|H|V|N", seq))
+ambiguous <- names(clean_seq[unambiguousl])
+clean_meta <- clean_meta0[clean_meta0$Isolate_Id %in% names(clean_seq),]
+
+#remove identical sequences sampled the same day
+duplicated.seq <- duplicated(clean_seq)
+dupl <- c()
+for(seq in names(unique(clean_seq[duplicated.seq])) ){
+  Ids <- which(clean_seq==clean_seq[seq])
+  Ids_names <- names(clean_seq[Ids])
+  dates <- clean_meta$Decimal_Date[Ids]
+  R <- list_loc[Ids_names]
+  R <- sapply(R, function(r) r[min(3,length(r))])
+  dupl.dates <- duplicated(dates)
+  for (i in 1:length(Ids)) {
+    for(j in (1:length(Ids))[-i]) if(R[[i]]==R[[j]] & dates[i]==dates[j] & duplicated.seq[i]) dupl <- c(dupl, Ids[i])
+  }
+}
+dupl <- names(clean_seq[dupl])
+
+(clean_seq <- clean_seq[!names(clean_seq)%in% c(dupl, ambiguous)])
+
 ### identify outliers
 outliers = function(sq, n = 50, q = 0.9, score = 4){
   library(ape); library(dplyr)
@@ -67,7 +109,7 @@ outliers = function(sq, n = 50, q = 0.9, score = 4){
   md = data.frame()
   sq_pos = 1:length(sq)  ##  all indices of each sequence.
   for(i in sq_pos){
-    cat('\rWork in progress ... ',round(i/length(sq)*100),'%', sep='')
+    cat('\rWork in progress ... ',round(i/length(sq)*100),'%')
     flush.console()
     ix <- c(i, sample(sq_pos[-i], n - 1 ) )  ##  Sample of indices
     tmp = as.DNAbin( sq[ix] ) %>% dist.dna(model = 'raw') %>% as.matrix() %>% apply(1, median)
@@ -82,55 +124,80 @@ outliers = function(sq, n = 50, q = 0.9, score = 4){
   return( as.character(filter(md2, z >= score)$tip) )
 }
 
-spill <- outliers(tmp.aln, n=100, score=3.5)
+spill <- outliers(clean_seq, score=5)
+clean_seq <- clean_seq[!names(clean_seq)%in%spill]
+clean_meta <- filter(clean_meta0, clean_meta0$Isolate_Id %in% names(clean_seq))
 
-clean_meta <- clean_meta0[ !(clean_meta0$Isolate_Id %in% c(spill)), ]
-(clean_seq <- tmp.aln[clean_meta$Isolate_Id])
-
-L = lapply((1:length(clean_seq)), function(i) as.character(clean_seq[[i]]) )
-
-write.fasta(L, names = names(clean_seq), file.out=paste("nt_",prefix,"_clean.fasta", sep=""))
+writeXStringSet(clean_seq, filepath=paste("nt_",prefix,"_clean.fasta", sep=""))
 fwrite(clean_meta, paste("data_",prefix,"_clean.csv", sep="") )
+
 clean_meta <- read.csv('data_world_13-19_clean.csv')
 clean_seq <- readDNAStringSet (paste("nt_",prefix,"_clean.fasta", sep=""))
 
 ### Random subsample
-nb_per_month_reg <- matrix(0,nrow=ncol(reg), ncol=(2019.25-2013.5-(3/12))*12)
+nb_per_month_reg <- matrix(0,nrow=ncol(reg), ncol=88)
 rownames(nb_per_month_reg)<- colnames(reg)
-colnames(nb_per_month_reg)<- round(seq(from=2013.5+(3/12), to=2019.25-(1/12), by=1/12), digits=2)
+colnames(nb_per_month_reg)<- round(seq(from=2012, to=2019.25, by=1/12), digits=2)
 for(r in colnames(reg)){
   sub <- clean_meta[(clean_meta$Region == r),]
   col<-0
-  for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
+  for(m in seq(from=2012+(1/12), to=2019.25+(1/12), by=1/12)){
     col<-col+1
     sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
     nb_per_month_reg[r,col]<- nrow(sub_month)
   }
 }
 nb_per_month_reg
-# fwrite(nb_per_month_reg, 'nb_seq_per_month_reg.csv')
-subsamp_meta <- clean_meta[0,]
-for (r in colnames(reg) ){
-  sub <- clean_meta[(clean_meta$Region == r),]
-  col<-0
-  Tr <- c()
-  for(m in seq(from=2013.5+(4/12), to=2019.25, by=1/12)){
-    col<- col+1
-    thresh <- min(max(c(round(quantile(unlist(nb_per_month_reg[, max(c(0,col-5)):min(c(ncol(nb_per_month_reg),col+6))]), probs=seq(from=0, to=1, by=1/3))[3]), 10)),30)
-    Tr <- c(Tr, thresh)
-    sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
-    nbs <- nrow(sub_month)
-    if (nbs>thresh){
-      order = sample.int(nbs, thresh)
-      subsamp_meta <- bind_rows( subsamp_meta, sub_month[order, ] )
-    } else subsamp_meta <- bind_rows(subsamp_meta, sub_month)
+write.csv(nb_per_month_reg, 'nb_seq_per_month_reg_init.csv')
+
+identify_seasons<-matrix(0,nrow=ncol(reg), ncol=7)
+rownames(identify_seasons)<- colnames(reg)
+for(r in colnames(reg)){
+  for(y in 0:6){
+    identify_seasons[r,y+1] <- names( which( nb_per_month_reg[r,((y*12)+1):min(((y+1)*12),ncol(nb_per_month_reg))] == min(nb_per_month_reg[r,((y*12)+1):min(((y+1)*12),ncol(nb_per_month_reg))]) ) ) [[1]]
   }
 }
- 
-hist(subsamp_meta$Decimal_Date, breaks=60)
+identify_seasons <- matrix(as.numeric(identify_seasons), ncol=7)
+rownames(identify_seasons)<- colnames(reg)
+identify_seasons <- identify_seasons[,2:7]
+
+thresh <- 300
+subsamp_meta <- clean_meta[0,]
+for( r in colnames(reg)){
+  sub <- clean_meta[(clean_meta$Region == r),]
+  begin <- 2012.25-(1/12)
+  for(m in c(identify_seasons[r,],2019.25)){
+    sub_year <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= begin, ]
+    nbs <- nrow(sub_year)
+    Tr <- round(thresh*(m-begin))
+    if(nbs>Tr){
+      order = sample.int(nbs, Tr)
+      subsamp_meta <- bind_rows( subsamp_meta, sub_year[order, ] )
+    } else subsamp_meta <- bind_rows(subsamp_meta, sub_year)
+    begin <- m
+  }
+}
+nrow(subsamp_meta)
+
+nb_per_month_reg <- matrix(0,nrow=ncol(reg), ncol=88)
+rownames(nb_per_month_reg)<- colnames(reg)
+colnames(nb_per_month_reg)<- round(seq(from=2012, to=2019.25, by=1/12), digits=2)
+
+for(r in colnames(reg)){
+  sub <- subsamp_meta[(subsamp_meta$Region == r),]
+  col<-0
+  for(m in seq(from=2012+(1/12), to=2019.25+(1/12), by=1/12)){
+    col<-col+1
+    sub_month <- sub[sub$Decimal_Date <m & sub$Decimal_Date >= m-(1/12), ]
+    nb_per_month_reg[r,col]<- nrow(sub_month)
+  }
+}
+
+write.csv(nb_per_month_reg, 'nb_seq_per_month_reg_subsamp.csv')
+
+hist(subsamp_meta$Decimal_Date, breaks=200)
 Tr
 (subsamp_seq <- clean_seq[subsamp_meta$Isolate_Id])
 
-L = lapply((1:length(subsamp_seq)), function(i) as.character(subsamp_seq[[i]]) )
-write.fasta(L, names = names(subsamp_seq), file.out=paste("nt_",prefix,"_subsamp.fasta", sep=""))
+writeXStringSet(subsamp_seq, filepath=paste("nt_",prefix,"_subsamp.fasta", sep=""))
 fwrite(subsamp_meta, paste("data_",prefix,"_subsamp.csv", sep="") )

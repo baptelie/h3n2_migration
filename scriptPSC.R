@@ -118,26 +118,12 @@ nodes.sameReg <- function(reg, node, GS, tree, elts=node){
   return(elts)
 }
 
-getMembers_all <- function(tree){
+getMembers <- function(listClades, tree){
   #lists all the nodes from each clade of interest continuously in the same region
   GS <-c(getStates(tree, type='tips'), getStates(tree, type='nodes')) #region of each tip/node in the order : tips and then nodes
-  edge.chg <- apply(tree$edge, 1, function(edge) {GS[edge[1]]!=GS[edge[2]] & edge[2]>tree$Nnode+1} ) #true/false in function of whether the edge changes of region, in the order of tree$edge
-  node.chg <- tree$edge[,2][edge.chg] #root of each clade in the recipient region
-  GSe <- GS[tree$edge[,2]] #reorder GS in function of the edge order
-  chg <- data.frame(node=node.chg, reg=GSe[edge.chg]) #recipient region
-  
-  apply(chg, 1, function(c) nodes.sameReg(reg=c[[2]], node=c[[1]], GS, tree) )
-}
-
-getMembers_succes <- function(tree){
-  GM_all <- getMembers_all(tree)
-  nb_tips <- length(tree$tip.label)
-  lengthtips.GM_all <- sapply(GM_all, function(gm) length(gm[strtoi(gm)<=nb_tips]))
-  GM_succ <- GM_all[lengthtips.GM_all>4]
-  duration <- sapply(GM_succ, function(gm) max(meta_tree$Decimal_Date[strtoi(gm)]) - min(meta_tree$Decimal_Date[strtoi(gm)]))
-  GM_succ <- GM_succ[duration>=0.25]
-  names(GM_succ) <- sapply(names(GM_succ), function(n) nodenumb.to.lab(n))
-  GM_succ
+  M <- apply(listClades, 1, function(c) sapply(nodes.sameReg(reg=c[2], node=c[3], GS, tree), function(n) nodenumb.to.lab(n) ) )
+  names(M) <- sapply(listClades$Node, function(n) nodenumb.to.lab(n))
+  M
 }
 
 length.clades <- function(tree, GS){
@@ -146,35 +132,38 @@ length.clades <- function(tree, GS){
   node.chg <- tree$edge[,2][edge.chg] #root of each clade in the recipient region
   GSe <- GS[tree$edge[,2]] #reorder GS in function of the edge order
   reg.chg <- GSe[edge.chg] #recipient region
+  print(length(node.chg))
   L <- lapply(1:length(reg.chg), function(edge) length(nodes.sameReg(reg.chg[edge], node.chg[edge], GS, tree))  )
   names(L) <- node.chg
   unlist(L)
 }
 
-list.clades <- function(trenb){
-  tree <- trees.sm[[trenb]]
+list.clades <- function(tree){
   GS <- c(getStates(tree, type='tips'), getStates(tree, type='nodes'))
-  L <- strtoi(sapply(Migr_per_tree[[trenb]], function(m) m[[1]]))
+  LC <- length.clades(tree, GS)
+  LC <- LC[LC>19] #keep clades with at least 20 continuous edges on the same region
+  L <- names(LC)
   listRegParents <- unlist(lapply(L, function(node) GS[getParent(tree, node)] ))
   listRegReciep <- unlist(lapply(L, function(node) GS[node] ))
   
-  data.frame(Parent_Reg = listRegParents, Reciep_Reg = listRegReciep, Node = L)
+  result <- data.frame(Parent_Reg = listRegParents, Reciep_Reg = listRegReciep, Node = L, length = LC)
+  result
 }
 
-pairsMigr <- function(trenb){
-  listClades<- list.clades(trenb)
-  donorRec_pairs <- matrix(data=0, nrow=length(regions), ncol=length(regions), dimnames=list(regions, regions))
+pairsMigr <- function(listClades){
+  donorRec_pairs <- matrix(data=0, nrow=length(unique(region)), ncol=length(unique(region)))
+  rownames(donorRec_pairs) <- levels(region)
+  colnames(donorRec_pairs) <- levels(region)
   
   for (r in 1:nrow(listClades)) donorRec_pairs[ toString(listClades[r,1]), toString(listClades[r,2]) ] <- donorRec_pairs[ toString(listClades[r,1]), toString(listClades[r,2]) ] + 1
   donorRec_pairs
 }
 
-listPairsMigr <- function(PM, trenb){
-  nbmax <- max(PM)
-  listClades<- list.clades(trenb)
-  donorRec_pairs <- array(data=NA, dim=c(length(regions), length(regions), nbmax) )
-  rownames(donorRec_pairs) <- regions
-  colnames(donorRec_pairs) <- regions
+listPairsMigr <- function(listClades){
+  nbmax <- max(pairsMigr(listClades))
+  donorRec_pairs <- array(data=NA, dim=c(length(unique(region)), length(unique(region)), nbmax) )
+  rownames(donorRec_pairs) <- levels(region)
+  colnames(donorRec_pairs) <- levels(region)
   
   for (r in 1:nrow(listClades)) {
     x <- donorRec_pairs[ toString(listClades[r,1]), toString(listClades[r,2]), ][!is.na(donorRec_pairs[ toString(listClades[r,1]), toString(listClades[r,2]), ])]
@@ -229,7 +218,7 @@ test.date.inRange <- function(start, end, date, tol){
   FALSE
 }
 
-fitness.distr <- function(VaxStrain, reg, ageRoot, dt.edges, tol=0.125){
+fitness.distr <- function(VaxStrain, reg, ageRoot, tol=0.125){
   # give a list of the fitnesses of the donor region around the same period as ageRoot, in the same vaccine strain
   edges.in <- apply(dt.edges[,reg,], 1, function(e) test.date.inRange(e[1],e[2],ageRoot, tol) )
   edges.in <- edges.in[rownames(meta_tree)]; edges.in[length(tre.tt$tip.label)+1] <- FALSE #reorder in the order of meta_tree, set the tree root to false
@@ -237,7 +226,7 @@ fitness.distr <- function(VaxStrain, reg, ageRoot, dt.edges, tol=0.125){
   Fitness[nodes]
 }
 
-time.slices <- function(HACs.tips, tree, file, dt.edges){
+time.slices <- function(HACs.tips, tree, file){
   wd <- toString(getwd())
   setwd(file)
   nodes <- 1
@@ -246,7 +235,7 @@ time.slices <- function(HACs.tips, tree, file, dt.edges){
       print(t)
       pdf(paste(nodes,"_",format(round(t, 1), nsmall = 1), ".pdf", sep=''))
       c = 1
-      fitness <- fitness.distr(tree, reg = "North_America", ageRoot = t, dt.edges)
+      fitness <- fitness.distr(tree, reg = "North_America", ageRoot = t)
       fitness <- fitness[names(fitness)%in%nodesHAC]
       if(length(fitness)>1){
         min <- min(c(fitness, -5)) -5
@@ -259,7 +248,7 @@ time.slices <- function(HACs.tips, tree, file, dt.edges){
           col = palette()[c]
           c <- c+1
           par(new=TRUE)
-          fitness <- fitness.distr(tree, reg = reg, ageRoot = t, dt.edges)
+          fitness <- fitness.distr(tree, reg = reg, ageRoot = t)
           fitness <- fitness[names(fitness)%in%nodesHAC]
           if(length(fitness>0)) plot.ecdf(fitness, xlim=c(min,max), col=col, main='', xlab="", pch=0, verticals=TRUE)
         }
@@ -272,24 +261,24 @@ time.slices <- function(HACs.tips, tree, file, dt.edges){
   setwd(wd) #go back to the actual working directory
 }
 
-likelihood.obs <- function(Donor, Rec, LPM, listClades, dt.edges){
+likelihood.obs <- function(Donor, Rec, LPM, listClades){
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
   L = 1
   for (c in clades){
     fitnessRoot <- Fitness[c]
-    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date, dt.edges)
+    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
     if(length(fitnessDon)<10) next()
     L = L * (1-ecdf(fitnessDon)(fitnessRoot))
   }
   log(L)
 }
 
-likelihood.sim <- function(Donor, Rec, LPM, nsim, dt.edges){
+likelihood.sim <- function(Donor, Rec, LPM, nsim){
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])]
   Lmatrix = matrix(data=0, nrow=length(clades), ncol=nsim)
   rownames(Lmatrix)=clades
   for (c in clades){
-    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date, dt.edges)
+    fitnessDon <- fitness.distr(meta_tree[c,]$VaxStrain, Donor, meta_tree[c,]$Decimal_Date)
     if(length(fitnessDon)<10) next()
     R <- sapply(1:nsim, function(i) sample.int(length(fitnessDon),1))
     e <- ecdf(fitnessDon)
@@ -298,10 +287,11 @@ likelihood.sim <- function(Donor, Rec, LPM, nsim, dt.edges){
   apply(Lmatrix, 2, function(x) sum(x))
 }
 
-proba.obs <- function(Donor, Rec, LPM, PM, dt.edges){
+proba.obs <- function(Donor, Rec, LPM){
   if(PM[Donor,Rec]>=1){
-    L <- likelihood.obs(Donor,Rec,LPM, listClades, dt.edges)
-    sim <- likelihood.sim(Donor,Rec, LPM, 100, dt.edges)
+    L <- likelihood.obs(Donor,Rec,LPM, listClades)
+    sim <- likelihood.sim(Donor,Rec, LPM, 100)
+    #hist(sim, breaks=50, main=c(Donor, Rec))
     e <- ecdf(sim)
     return(e(L))
   }
@@ -375,12 +365,12 @@ fitness_random <- function(nsim=100){
 }
 
 
-fitness_evol <- function(Donor, Rec, LPM, tree, plot=FALSE){
+fitness_evol <- function(Donor, Rec, LPM, plot=FALSE){
   if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
   slope_m <- c(); r2_m <- c(); CI95_m <- c() #initialise the output values
   slope_s <- c(); r2_s <- c(); CI95_s <- c()
-  GS <- c(getStates(tree, type='tips'), getStates(tree, type='nodes'))
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
   
   for (c in clades){
     #compute the evolution in the migrating clade
@@ -427,19 +417,19 @@ VS_slope <- function(VS, plot=FALSE){
     plot(t,fit, main=VS )
     abline(LM, col='lightblue')
     matlines(t, conf_interval[,2:3], col = "blue", lty=2)
-    }
+  }
   
   list(Coef=LM$coefficients, CI2.5=confint(LM)[1], CI97.5=confint(LM)[2])
 }
 
-fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, tree, plot=FALSE){
+fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, plot=FALSE){
   # Compare the slope of fitness evolution within the migrant clade vs the global 
   # evolution in the same vaccine strain
   
   if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
   slope <- c(); CI95 <- c() #initialise the output values
-  GS <- c(getStates(tree, type='tips'), getStates(tree, type='nodes'))
+  GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes'))
   
   for (c in clades){
     #compute the evolution in the migrating clade
@@ -462,42 +452,32 @@ fitness_evol_vs_VS <- function(Donor, Rec, LPM, VS_slopes, tree, plot=FALSE){
   list(slope=slope, CI95=CI95)
 }
 
-edges_same_time <- function(clade, GS){
+edges_same_time <- function(clade){
   # return the list of edges (identified by the child name) observed at the same 
-  #time as the node of the clade of interest, in the same vaccine clade
+  #time as the node of the clade of interest
   date <- meta_tree[clade,'Decimal_Date']
-  VaxClade <- meta_tree[clade,'VaxStrain']
-  nodeDates <- nodeHeights(tre.tt) + min(meta_tree$Decimal_Date)
-  nodes.reg.bool <- apply()
-  nodes.dates.bool <- apply(nodeDates,1, function(e){
-                    if(e[1]<date & e[2]>date & e[2]<date+0.25) return(TRUE)
-                    FALSE
-                    })
-  # nodes.dates.bool <- apply(dt.edges,c(1,2), function(e) {
-  #                   if(!anyNA(e)){
-  #                     if(e[1]<date & e[2]>date) return(TRUE)}
-  #                   })
-  nodes.clade.bool <- sapply(tre.tt$edge[,2], function(e) {
-                    if(meta_tree[nodenumb.to.lab(e),'VaxStrain'] == VaxClade ) return(TRUE)
-                    FALSE} )
-  nodes <- tre.tt$edge[nodes.clade.bool & nodes.dates.bool,2]
-  # nodes <- rownames(dt.edges)[apply(nodes.bool,1,
-  #                   function(r) {
-  #                     if(!is.null(unlist(r))) return(TRUE)
-  #                     FALSE
-  #                   }) & nodes.clade.bool & meta_tree$Decimal_Date[tre.tt$edge[,1]]>date-0.25]
-  nodes[nodes>length(tre.tt$tip.label)]
+  nodes.bool <- apply(dt.edges,c(1,2), function(e) {
+    if(!anyNA(e)){
+      if(e[1]<date & e[2]>date) return(TRUE)}
+  })
+  nodes <- rownames(dt.edges)[apply(nodes.bool,1,
+                                    function(r) {
+                                      if(!is.null(unlist(r))) return(TRUE)
+                                      FALSE
+                                    }          
+  )]
+  nodes[!nodes==clade]
   #keep only the edges between nodes, and give the parent of the edge
-  # unique(unlist(sapply(nodes, function(n){
-  #                    if(grepl('NODE',n)) getParent(tre.tt, nodelab.to.numb(n))
-  # })))
+  unique(unlist(sapply(nodes, function(n){
+    if(grepl('NODE',n)) getParent(tre.tt, nodelab.to.numb(n))
+  })))
 }
 
 Descendants_timeSlice <- function(node, SliceEnd, tree=tre.tt, elts=node){
   children <- tree$edge[which(tree$edge[,1]==node),2]
-  w <- children[meta_tree$Decimal_Date[children]<=SliceEnd]
+  w <- children[which(meta_tree$Decimal_Date[children]<SliceEnd)]
   elts <- c(elts, w)
-  if (length(w)>0){
+  if (length(w>0)){
     for (i in w) {
       elts <- Descendants_timeSlice(i, SliceEnd, tree, elts)
     }
@@ -506,37 +486,36 @@ Descendants_timeSlice <- function(node, SliceEnd, tree=tre.tt, elts=node){
 }
 
 
-fitness_evol_vs_TimeSlice <- function(Donor, Rec, LPM, PM, dt.edges, membersClades, GS, plot=FALSE){
+fitness_evol_vs_TimeSlice <- function(Donor, Rec, LPM, plot=FALSE){
   # Compare the slope of fitness evolution within the migrant clade vs the global 
   # evolution at the same time period (time slice)
   
   if(PM[Donor,Rec]<1) return(NA) #if no migration event for this pair of migration is identified
   clades <- LPM[toString(Donor), toString(Rec), ][!is.na(LPM[toString(Donor), toString(Rec), ])] #list the clades corresponding to this pair of migration
-  slope <- c(); difference <- c() #initialise the output values
+  slope <- c(); CI95 <- c() #initialise the output values
   
   for (c in clades){
     #compute the evolution in the migrating clade
     node_P <- getParent(tre.tt,nodelab.to.numb(c))
-    tips_m <- strtoi(membersClades[[c]][strtoi(membersClades[[c]])<=length(tre.tt$tip.label)])
+    tips_m <- grep('EPI',membersClades[[c]], value=TRUE)
     fit_m <- Fitness[tips_m]-Fitness[node_P]
     t_m <- meta_tree[tips_m,]$Decimal_Date - meta_tree[node_P,]$Decimal_Date
-    if(length(tips_m)<3 | length(unique(t_m))==1) next()
+    if(length(tips_m)<5) next()
     reg_m <- lm(fit_m~t_m+0)
-    lgt=max(t_m)
     if (plot) {
-      plot(t_m, fit_m, col=rgb(0.6,0,0.05),xlim=c(0,lgt), ylim=c(-15,5), pch=18,cex=1.2)
-      abline(reg_m, col=rgb(0.8,0,0.1))
+      plot(t_m, fit_m, main=paste('fitness evolution during migration from', Donor,'to', Rec))
+      abline(reg_m)
     }
     
     #compute the global evolution in the same time slice
-    edges <- edges_same_time(c, GS)
-    if(length(edges)<2) next()
+    end=max(t_m) + meta_tree[node_P,]$Decimal_Date
+    edges <- edges_same_time(c)
+    if(length(edges)<2) return(NA)
     tips_c <- sapply(edges, function(e){
-                    tips <- Descendants_timeSlice(e, meta_tree$Decimal_Date[e]+lgt)
-                    tips <- tips[tips<=length(tre.tt$tip.label)] #keep only the tips
-                    if(length(tips)>3) return(c(e,tips)) #add the root of the clade for subsequent analysis
-                    })
-
+      tips <- Descendants_timeSlice(e, end)
+      tips <- tips[tips<=length(tre.tt$tip.label)] #keep only the tips
+      if(length(tips)>5) return(c(e,tips)) #add the root of the clade for subsequent analysis
+    })
     fit_c <- c()
     t_c <- c()
     for(e in tips_c){
@@ -545,65 +524,37 @@ fitness_evol_vs_TimeSlice <- function(Donor, Rec, LPM, PM, dt.edges, membersClad
         t_c <- c(t_c, meta_tree$Decimal_Date[e[-1]] -  meta_tree$Decimal_Date[e[1]])
       }
     }
-    if(is.null(t_c)) next()
+    if(is.null(t_c)) return(NA)
     reg_c <- lm(fit_c~t_c+0)
-    
-    if(all(fit_c==0) & all(fit_m==0)){
-      D=FALSE
-    } else {
-      FitEvol <- data.frame(cat=c(rep('migr',length(t_m)), rep('ctrl', length(t_c))), t=c(t_m,t_c), fit=c(fit_m, fit_c) )
-      Ancova <- lm(fit~t*cat+0, data=FitEvol)
-      if(summary(Ancova)$coefficients[4,4]<0.05){ D=TRUE;} else D=FALSE
-    }
-    
     if (plot) {
-      s <- sample.int(length(t_c),100)
-      par(new=TRUE)
-      plot(t_c[s], fit_c[s], col=gray(0.3),xlim=c(0,lgt), ylim=c(-15,5), pch=15,cex=0.5)
-      abline(reg_c, col=gray(0.7))
+      plot(t_c, fit_c, main='fitness evolution in the sale time slice')
+      abline(reg_c)
     }
     
     slope <- c(slope, reg_m$coefficients - reg_c$coefficients)
-    difference <- c(difference, D)
+    CI95 <- c(CI95, confint(reg_m) - confint(reg_c) )
   }
   if(is.null(slope)) return(NA)
-  
-  list(slope=slope, dif=difference)
+  list(slope=slope, CI95=CI95)
 }
 
-trunk <- function(tree){
-  tips_last_year <- tree$tip.label[meta_tree$Decimal_Date>(max(meta_tree$Decimal_Date)-1)] #identify the tips sampled during the last year
-  tips <- tips_last_year[sample.int(length(tips_last_year), 100)] #randomly take 10 of them
-  
-  getAllParents <- function(node,tree=tre.tt){
-    Parents <- c()
-    p <- nodelab.to.numb(node)
-    while(p != length(tree$tip.label)+1){
-      p <- getParent(tree,p)
-      Parents <- c(Parents,p)
-    }
-    Parents
-  }
-  
-  listParents <- lapply(tips, getAllParents)
-  f <- table(listParents)
-  names(f)[f >= 10]
-}
+library(phytools); library(ape); library(Biostrings); library(seqinr);
+library(lubridate); library(magrittr); library(dplyr); library(stringr);
 
-trunk_location <- function(simtrees, treeTopo){
-  trunkNodes <- trunk(treeTopo)
-  locNodes <- lapply(simtrees, function(t){
-    loc <- getStates(t, type='nodes')
-    loc[trunkNodes]-length(treeTopo$tip.label)
-  })
-  datesNodes<-meta_tree$Decimal_Date[trunkNodes]
-  locFreq <- matrix(0, nrow=length(unique(region)), ncol=round((max(datesNodes)-min(datesNodes))*12)+1 )
-  rownames(locFreq)<- unique(region)
-  for(i in 1:length(trunkNodes)){
-    d <- (datesNodes[[i]]-min(datesNodes)) %/% (1/12)
-    for(lt in 1:length(locNodes)){
-      locFreq[locNodes[[lt]][[i]],d] <- locFreq[locNodes[[lt]][[i]],d] + 1
-    }
-  }
-  locFreq
-}
+tre.tt <- ape::read.nexus("timetree.nexus")
+print(tre.tt)
+meta = read.csv('data_world_13-19_sdubsamp.csv')
+region <- meta$Region
+names(region) <- meta$Isolate_Id
+
+dst<- tre.tt
+dst$edge.length[dst$edge.length==0]<-max(nodeHeights(tre.tt))*1e-6 # set zero-length branches to be 1/1000000 total tree length
+nsim=25
+
+start=Sys.time()
+trees.sm <- make.simmap(dst, region, model='ARD', nsim=nsim, Q='mcmc', burnin=10000, samplefreq=200, pi='estimated')
+end=Sys.time()
+print(end-start)
+
+write.simmap(trees.sm, 'trees.sm25')
+print('wrote the 25 stochastic mappings as trees.sm25')
