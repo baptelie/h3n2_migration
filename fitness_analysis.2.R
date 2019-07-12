@@ -113,13 +113,13 @@ Migr_per_tree <- mclapply(trees.sm, function(t){
   get_members_succes(t, trunk.tree = trunk_tree, meta = meta_tree)
 }, mc.cores=if(.Platform$OS.type=="windows") 1L else 5L)
 
-summary_proba_obs('Europe', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores = 4)
-summary_proba_obs('Oceania', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores= 4)
-summary_proba_obs('North_America', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores = 4)
+summary_proba_obs('Europe', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores = 6L)
+summary_proba_obs('Oceania', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores= 6L)
+summary_proba_obs('North_America', simmaps = trees.sm, meta = meta_tree, Migr_per_tree, trnk = trunk_tree, ncores = 6L)
 
-summary_slopes('Europe', simmaps = trees.sm, meta = meta_tree, ncores = 4L, trnk = trunk_tree)
-summary_slopes('Oceania', simmaps = trees.sm, meta = meta_tree, ncores = 4L, trnk = trunk_tree)
-summary_slopes('North_America', simmaps = trees.sm, meta = meta_tree, ncores = 4L, trnk = trunk_tree)
+summary_slopes('Europe', simmaps = trees.sm, meta = meta_tree, ncores = 6L, trnk = trunk_tree)
+summary_slopes('Oceania', simmaps = trees.sm, meta = meta_tree, ncores = 6L, trnk = trunk_tree)
+summary_slopes('North_America', simmaps = trees.sm, meta = meta_tree, ncores = 6L, trnk = trunk_tree)
 
 region <- getStates(trees.sm[[1]],type='tips')
 nreg=length(unique(region))

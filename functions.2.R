@@ -137,12 +137,12 @@ get_members_succes <- function(tree, trunk.tree, meta){
   GM_all <- get_members_all(tree)
   nb_tips <- length(tree$tip.label)
   lengthtips.GM_all <- sapply(GM_all, function(gm) sum(strtoi(gm)<=nb_tips) )
-  GM_succ <- GM_all[ lengthtips.GM_all>=4 & !names(GM_all) %in% trunk.tree ]
+  GM_succ <- GM_all[ lengthtips.GM_all>=6 & !names(GM_all) %in% trunk.tree ]
   duration <- sapply( GM_succ, function(gm) max(meta$Decimal_Date[strtoi(gm)]) - min(meta$Decimal_Date[strtoi(gm)]) )
   e.length <- tree$edge.length
   names(e.length) <- tree$edge[,2]
   max.edge.length <- sapply(GM_succ, function(gm) max(e.length[gm[-1]] ) )
-  GM_succ <- GM_succ[duration>=0.25 & max.edge.length<0.5]
+  GM_succ <- GM_succ[duration>=0.25 & max.edge.length<1]
   names(GM_succ) <- sapply(names(GM_succ), function(n) nodenumb_to_lab(n))
   GM_succ
 }
@@ -349,9 +349,10 @@ summary_proba_obs <- function(Rec, simmaps, meta, Migr_per_tree, trnk, ncores){
   # scale_fill_manual(values=rep("#00AFBB",nsim))
   
   ggp +
-    geom_area(aes(x = ifelse(x<mean(unique(distr.tbl$lik)), x, 0)),
-              fill="#00AFBB",
-              alpha=0.6)
+    # geom_area(aes(x = ifelse(bootstrap.distr<mean(unique(distr.tbl$lik)), bootstrap.distr, 0)),
+    #           y = ..density..,
+    #           fill="#00AFBB",
+    #           alpha=0.6) +
     geom_segment(
       aes(x = mean(unique(distr.tbl$lik)), xend= mean(unique(distr.tbl$lik)), y=0, yend=layer_scales(ggp)$y$range$range[[2]] * 0.8, alpha=0.2),
       linetype = 'dashed',
@@ -449,40 +450,40 @@ fitness_evol <- function(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, meta =
     tips_m <- strtoi(membersClades[[c]][strtoi(membersClades[[c]])<=length(refTree$tip.label)]) #get the tips in the recipient region
     fit_m <- meta$Fitness[tips_m] - meta$Fitness[node_P]
     t_m <- meta[tips_m,]$Decimal_Date - meta[node_P,]$Decimal_Date
-    reg_m <- lm(fit_m~t_m+0)
-    lgt=max(t_m)
     
     #compute the global evolution in the same time slice
-    edges <- edges_same_time(node_P, Trop, GS, trnk, tol_before = 0.125, tol_after = 0.125)
+    edges <- edges_same_time(node_P, Trop, GS, trnk, tol_before = 0.08, tol_after = 0.08)
     edges <- edges[edges>length(refTree$tip.label)] #keep only the internal nodes
     
-    if(length(edges)<2) next()
+    if(length(edges)<6) next()
     tips_c <- sapply(edges, function(e){
       nodes <- descendants_time_slice(node = e,SliceEnd = max(meta[tips_m,]$Decimal_Date), GS)
       e.length <- refTree$edge.length
       names(e.length) <- refTree$edge[,2]
       max.edge.length <- max(e.length[nodes] )
       tips <- nodes[nodes<=length(refTree$tip.label)] #keep only the tips
-      duration <- max(meta$Decimal_Date[strtoi(tips)]) - meta$Decimal_Date[e]
-      if(length(tips)>3 & duration > 0.2 & max.edge.length < 1) return(c(e,tips)) #add the root of the clade for subsequent analysis
+      if(length(tips)<6) return(NULL)
+      duration <- max(meta$Decimal_Date[strtoi(nodes)]) - min(meta$Decimal_Date[strtoi(nodes)])
+      if(duration >= 0.25 & max.edge.length < 1) return(c(e,tips)) #add the root of the clade for subsequent analysis
     })
     
     fit_c <- t_c <- tips.an <- c()
     nbCl <- 0
-    flush.console()
     for(e in tips_c){
       if(!is.null(e)){
         nbCl <- nbCl + 1
-        flush.console()
         tips.an <- c(tips.an, e[-1])
         fit_c <- c(fit_c, meta$Fitness[e[-1]] - meta$Fitness[e[1]])
         t_c <- c(t_c, meta_tree$Decimal_Date[e[-1]] -  meta_tree$Decimal_Date[e[1]])
       }
     }
-    if(nbCl < 6) next()
+    if(nbCl < 4 ) next()
     fit_c <- fit_c[!duplicated(tips.an)]
     t_c <- t_c[!duplicated(tips.an)]
+    cat('C: ', fit_c,'\n')
     reg_c <- lm(fit_c~t_c+0)
+    cat('M: ', fit_m,'\n')
+    reg_m <- lm(fit_m~t_m+0)
     
     #ANCOVA test
     if(all(fit_c==0) & all(fit_m==0)){
@@ -490,7 +491,7 @@ fitness_evol <- function(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, meta =
     } else {
       FitEvol <- data.frame(clade = c(rep('migr',length(t_m)), rep('ctrl', length(t_c))), t=c(t_m,t_c), fit=c(fit_m, fit_c) )
       Ancova <- lm(fit~t*clade+0, data=FitEvol)
-      if(summary(Ancova)$coefficients['t:clademigr','Pr(>|t|)']<0.1) D=TRUE else D=FALSE
+      if(summary(Ancova)$coefficients['t:clademigr','Pr(>|t|)']<0.5) D=TRUE else D=FALSE
     }
     
     if(D){
@@ -511,8 +512,161 @@ fitness_evol <- function(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, meta =
   slope/sum(slope)
 }
 
+
+fitness_evol2 <- function(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, meta = meta_tree, refTree = tre.tt, plot=FALSE){
+  # Compare the slope of fitness evolution within the migrant clade vs the global 
+  # evolution at the same time period (time slice)
+  
+  Trop <- c("China","SE_Asia","Southern_Asia")
+  clades <- LPM[Trop,Rec,][!is.na(LPM[Trop,Rec,])] #list the clades corresponding to this pair of migration
+  slope <- data.table(inf=0, equal=0, sup=0)
+  
+  for (c in clades){
+    #compute the evolution in the migrating clade
+    node_P <- getParent(refTree,nodelab_to_numb(c))
+    tips_m <- strtoi(membersClades[[c]][strtoi(membersClades[[c]])<=length(refTree$tip.label)]) #get the tips in the recipient region
+    fit_m <- meta$Fitness[tips_m] - meta$Fitness[node_P]
+    t_m <- meta[tips_m,]$Decimal_Date - meta[node_P,]$Decimal_Date
+    reg_m <- lm(fit_m~t_m+0)
+    lgt=max(t_m)
+    
+    #compute the global evolution in the same time slice
+    edges <- edges_same_time(node_P, Trop, GS, trnk, tol_before = 0.125, tol_after = 0.125)
+    edges <- edges[edges>length(refTree$tip.label)] #keep only the internal nodes
+    
+    if(length(edges)<6) next()
+    compare <- sapply(edges, function(e){
+      nodes <- descendants_time_slice(node = e,SliceEnd = max(meta[tips_m,]$Decimal_Date), GS)
+      e.length <- refTree$edge.length
+      names(e.length) <- refTree$edge[,2]
+      max.edge.length <- max(e.length[nodes] )
+      tips <- nodes[nodes<=length(refTree$tip.label)] #keep only the tips
+      if(length(tips)<3) return(list(inf=NA, equal = NA, sup = NA))
+      duration <- max(meta$Decimal_Date[strtoi(tips)]) - meta$Decimal_Date[e]
+      if(duration < 0.2 | max.edge.length > 1) return(list(inf=NA, equal = NA, sup = NA))
+      
+      fit_c <- meta$Fitness[tips] - meta$Fitness[e]
+      t_c <- meta_tree$Decimal_Date[tips] -  meta_tree$Decimal_Date[e]
+      reg_c <- lm(fit_c~t_c+0)
+      
+      #ANCOVA test
+      if(all(fit_c==0) & all(fit_m==0)) return(list(inf=0, equal = 1, sup = 0))
+      
+      FitEvol <- data.frame(clade = c(rep('migr',length(t_m)), rep('ctrl', length(t_c))), t=c(t_m,t_c), fit=c(fit_m, fit_c) )
+      Ancova <- lm(fit~t*clade+0, data=FitEvol)
+      if(summary(Ancova)$coefficients['t:clademigr','Pr(>|t|)']>0.05) return(list(inf=0, equal = 1, sup = 0))
+      
+      if(reg_m$coefficients - reg_c$coefficients < 0) return(list(inf=1, equal = 0, sup = 0))
+      if (reg_m$coefficients - reg_c$coefficients > 0) return(list(inf=0, equal = 0, sup = 1))
+    })
+    
+    nb_obs <- sum(unlist(compare), na.rm=TRUE)
+    if(nb_obs < 6) next()
+    comp.sum <- data.table(inf = unlist(compare[1,]) %>% sum(., na.rm=TRUE)/nb_obs,
+                           equal = unlist(compare[2,]) %>% sum(., na.rm=TRUE)/nb_obs,
+                           sup = unlist(compare[3,]) %>% sum(., na.rm=TRUE)/nb_obs)
+    slope <- slope + comp.sum
+    
+    if (plot) {
+      plot(t_m, fit_m, col=rgb(0.6,0,0.05),xlim=c(0,lgt), ylim=c(-15,5), pch=18,cex=1.2, sub=paste('slope statitically different ',D), xlab='time (year)', ylab='fitness')
+      abline(reg_m, col=rgb(0.8,0,0.1))
+      
+      s <- sample.int(length(t_c),min(100, length(t_c)))
+      par(new=TRUE)
+      plot(t_c[s], fit_c[s], col=gray(0.3),xlim=c(0,lgt), ylim=c(-15,5), pch=15,cex=0.5, xlab='', ylab='')
+      abline(reg_c, col=gray(0.7))
+    }
+  }
+  slope/sum(slope)
+}
+
+fitness_evol3 <- function(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, meta = meta_tree, refTree = tre.tt, plot=FALSE){
+  # Compare the slope of fitness evolution within the migrant clade vs the global 
+  # evolution at the same time period (time slice)
+  
+  Trop <- c("China","SE_Asia","Southern_Asia")
+  clades <- LPM[Trop,Rec,][!is.na(LPM[Trop,Rec,])] #list the clades corresponding to this pair of migration
+  # slope <- data.table(inf=0, equal=0, sup=0)
+  reg_c <- reg_m <- c()
+  
+  for (c in clades){
+    #compute the evolution in the migrating clade
+    node_P <- getParent(refTree,nodelab_to_numb(c))
+    tips_m <- strtoi(membersClades[[c]][strtoi(membersClades[[c]])<=length(refTree$tip.label)]) #get the tips in the recipient region
+    fit_m <- meta$Fitness[tips_m] - meta$Fitness[node_P]
+    t_m <- meta[tips_m,]$Decimal_Date - meta[node_P,]$Decimal_Date
+    
+    #compute the global evolution in the same time slice
+    edges <- edges_same_time(node_P, Trop, GS, trnk, tol_before = 0.08, tol_after = 0.08)
+    edges <- edges[edges>length(refTree$tip.label)] #keep only the internal nodes
+    
+    if(length(edges)<5) next()
+    tips_c <- sapply(edges, function(e){
+      nodes <- descendants_time_slice(node = e,SliceEnd = max(meta[tips_m,]$Decimal_Date), GS)
+      e.length <- refTree$edge.length
+      names(e.length) <- refTree$edge[,2]
+      max.edge.length <- max(e.length[nodes] )
+      tips <- nodes[nodes<=length(refTree$tip.label)] #keep only the tips
+      if(length(tips)<3) return(NULL)
+      duration <- max(meta$Decimal_Date[strtoi(nodes)]) - min(meta$Decimal_Date[strtoi(nodes)])
+      if(length(tips)>5 & duration >= 0.25 & max.edge.length < 1) return(c(e,tips)) #add the root of the clade for subsequent analysis
+    })
+    
+    fit_c <- t_c <- tips.an <- c()
+    nbCl <- 0
+    for(e in tips_c){
+      if(!is.null(e)){
+        nbCl <- nbCl + 1
+        tips.an <- c(tips.an, e[-1])
+        fit_c <- c(fit_c, meta$Fitness[e[-1]] - meta$Fitness[e[1]])
+        t_c <- c(t_c, meta_tree$Decimal_Date[e[-1]] -  meta_tree$Decimal_Date[e[1]])
+      }
+    }
+    if(nbCl < 4) next()
+    fit_c <- fit_c[!duplicated(tips.an)]
+    t_c <- t_c[!duplicated(tips.an)]
+    reg_c <- c(reg_c, lm(fit_c~t_c+0)$coefficients)
+    reg_m <- c(reg_m, lm(fit_m~t_m+0)$coefficients)
+    
+    
+    # #ANCOVA test
+    # if(all(fit_c==0) & all(fit_m==0)){
+    #   D=FALSE
+    # } else {
+    #   FitEvol <- data.frame(clade = c(rep('migr',length(t_m)), rep('ctrl', length(t_c))), t=c(t_m,t_c), fit=c(fit_m, fit_c) )
+    #   Ancova <- lm(fit~t*clade+0, data=FitEvol)
+    #   if(summary(Ancova)$coefficients['t:clademigr','Pr(>|t|)']<0.05) D=TRUE else D=FALSE
+    # }
+    # 
+    # if(D){
+    #   if(reg_m$coefficients - reg_c$coefficients < 0) {slope$inf[1] <- slope$inf[1]+1
+    #   } else if (reg_m$coefficients - reg_c$coefficients > 0) slope$sup[1] <- slope$sup[1]+1
+    # } else slope$equal[1] <- slope$equal[1]+1
+    # 
+  }
+  #t-test
+  test <- t.test(x = reg_c, y = reg_m, paired = TRUE)
+  
+  if (plot) {
+    data <- data.table(coef = c(reg_m, reg_c), cat = c(rep('migrant',length(reg_m)), rep('tropics', length(reg_c)) ) )
+    
+    # ggplot(data, aes(cat, coef)) +
+    #   geom_boxplot(outlier.shape=NA) +
+    #   geom_jitter (width = 0.2, size = 0.5) +
+    #   labs(title = paste("Average proportion of the observed migration events from tropical Asian regions to",gsub('_',' ',Rec)),
+    #        y='', caption = test$p.value)
+    
+    ggpaired(data, x = 'cat', y = 'coef',
+             ylab = 'fitness evolution rate',
+             color = 'cat', line.color = "gray", line.size = 0.4,
+             palette = "jco")+
+      stat_compare_means(paired = TRUE)
+  }
+}
+
 summary_slopes <- function(Rec, simmaps, meta, ncores, trnk){
   nsim = length(simmaps)
+  slope <- c()
   slope <- mclapply(seq_along(simmaps), function(t){
     tre.sm <- simmaps[[t]]
     membersClades <- Migr_per_tree[[t]] #migration events per region pair
@@ -520,7 +674,7 @@ summary_slopes <- function(Rec, simmaps, meta, ncores, trnk){
     PM <- pairs_migr(tre.sm, t)
     GS <- c(getStates(tre.sm, type='tips'), getStates(tre.sm, type='nodes')) #region of each tip/node in the order : tips and then nodes
     LPM <- list_pairs_migr(PM,tre.sm,t)
-    fitness_evol(Rec, LPM, PM, dt.edges, membersClades, GS, trnk, plot=TRUE)
+    fitness_evol(Rec, LPM, PM, dt.edges, membersClades, GS, trnk)
   }, mc.cores=if(.Platform$OS.type=="windows") 1L else ncores)
   
   slope.tbl <- data.table(variable = rep(c('inf','equal','sup'), nsim), value = unlist(slope))
